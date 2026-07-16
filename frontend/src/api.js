@@ -60,6 +60,10 @@ export function reportDocxUrl(id) {
   return `/api/tasks/${id}/report.docx`
 }
 
+export function interpretHtmlUrl(id) {
+  return `/api/tasks/${id}/interpret.html`
+}
+
 export function fileUrl(id, kind) {
   return `/api/tasks/${id}/files/${kind}`
 }

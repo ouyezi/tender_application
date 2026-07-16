@@ -236,9 +236,15 @@ a:hover {
   line-height: 1.3;
 }
 
-.status-running {
+.status-running,
+.status-diagnosing {
   background: #eff8ff;
   color: var(--info);
+}
+
+.status-interpreting {
+  background: #f0f4ff;
+  color: #4f46e5;
 }
 
 .status-paused {

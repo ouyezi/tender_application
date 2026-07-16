@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 import { listTasks, pauseTask, resumeTask, stopTask } from '../../api'
 
 const STATUS_LABELS = {
-  running: '诊断中',
+  interpreting: '解读中',
+  diagnosing: '诊断中',
+  running: '诊断中', // legacy
   paused: '已暂停',
   completed: '已完成',
   stopped: '已停止',
@@ -153,7 +155,7 @@ export default function AdminTasksPage() {
                     </td>
                     <td>
                       <div className="admin-table-actions">
-                        {status === 'running' && (
+                        {(status === 'diagnosing' || status === 'running') && (
                           <>
                             <button
                               type="button"
@@ -176,6 +178,18 @@ export default function AdminTasksPage() {
                               停止
                             </button>
                           </>
+                        )}
+                        {status === 'interpreting' && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-danger"
+                            disabled={busy}
+                            onClick={() =>
+                              runControl(task.id, '停止', stopTask)
+                            }
+                          >
+                            停止
+                          </button>
                         )}
                         {status === 'paused' && (
                           <>

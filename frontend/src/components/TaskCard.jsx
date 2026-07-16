@@ -1,7 +1,9 @@
 import { reportDocxUrl } from '../api'
 
 const STATUS_LABELS = {
-  running: '诊断中',
+  interpreting: '解读中',
+  diagnosing: '诊断中',
+  running: '诊断中', // legacy
   paused: '已暂停',
   completed: '已完成',
   stopped: '已停止',
