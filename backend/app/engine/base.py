@@ -21,3 +21,19 @@ class DiagnosisEngine(Protocol):
         config_item: dict[str, Any],
         documents: dict[str, str],
     ) -> DiagnosisItemResult: ...
+
+
+@dataclass
+class InterpretationResult:
+    markdown: str
+    title: str = "招标文件解读报告"
+
+
+class InterpretationAgent(Protocol):
+    async def interpret(
+        self,
+        *,
+        task_id: str,
+        tender_path: str,
+        background: str,
+    ) -> InterpretationResult: ...
