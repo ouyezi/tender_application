@@ -9,6 +9,7 @@ from app import db as database
 from app.config import MOCK_ITEM_DELAY_SECONDS
 from app.engine.mock import MockEngine
 from app.models import DiagnosisResult, DiagnosisTask, utcnow
+from app.services import report
 
 
 class SchedulerConflict(Exception):
@@ -259,6 +260,12 @@ async def _run(task_id: str) -> None:
                 await _mark_stopped(task_id)
                 return
 
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+        md_path, docx_path = await report.generate_and_save_reports(task_id)
+
         async with database.SessionLocal() as session:
             task = await session.get(DiagnosisTask, task_id)
             if task is None:
@@ -269,6 +276,8 @@ async def _run(task_id: str) -> None:
                 task.status = "stopped"
             else:
                 task.status = "completed"
+                task.report_md_path = md_path
+                task.report_docx_path = docx_path
             task.finished_at = utcnow()
             task.updated_at = utcnow()
             await session.commit()

@@ -25,9 +25,11 @@ async def client(tmp_path, monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
     monkeypatch.setattr("app.db.SessionLocal", session_factory)
     monkeypatch.setattr("app.services.files.UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr("app.services.report.REPORT_DIR", tmp_path / "reports")
     monkeypatch.setattr("app.config.MOCK_ITEM_DELAY_SECONDS", 0.05)
     monkeypatch.setattr("app.services.scheduler.MOCK_ITEM_DELAY_SECONDS", 0.05)
     (tmp_path / "uploads").mkdir()
+    (tmp_path / "reports").mkdir()
     scheduler.reset_for_tests()
 
     transport = ASGITransport(app=app)

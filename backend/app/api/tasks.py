@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -16,6 +18,15 @@ from app.services import files, scheduler
 from app.services.scheduler import SchedulerConflict
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+def _read_report_markdown(task: DiagnosisTask) -> str:
+    if not task.report_md_path:
+        return ""
+    path = Path(task.report_md_path)
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
 
 
 def _config_to_dict(row: DiagnosisConfig) -> dict:
@@ -126,7 +137,7 @@ async def get_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut:
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return _task_to_out(task)
+    return _task_to_out(task, report_markdown=_read_report_markdown(task))
 
 
 async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
@@ -138,7 +149,43 @@ async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return _task_to_out(task)
+    return _task_to_out(task, report_markdown=_read_report_markdown(task))
+
+
+@router.get("/{task_id}/report.docx")
+async def download_report(task_id: str, db: AsyncSession = Depends(get_db)) -> FileResponse:
+    task = await db.get(DiagnosisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if task.status != "completed" or not task.report_docx_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not available")
+    path = Path(task.report_docx_path)
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not available")
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{task_id}-report.docx",
+    )
+
+
+@router.get("/{task_id}/files/{kind}")
+async def download_task_file(
+    task_id: str,
+    kind: str,
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    if kind not in ("tender", "bid"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    task = await db.get(DiagnosisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    file_path = task.tender_path if kind == "tender" else task.bid_path
+    filename = task.tender_filename if kind == "tender" else task.bid_filename
+    path = Path(file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return FileResponse(path, filename=filename)
 
 
 @router.post("/{task_id}/pause", response_model=TaskOut)
