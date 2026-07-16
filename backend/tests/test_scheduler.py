@@ -115,6 +115,74 @@ async def test_stop_then_resume_conflict(client):
 
 
 @pytest.mark.asyncio
+async def test_resume_preserves_progress_no_duplicates(client):
+    await _seed_configs(client, 3)
+    body = await _create_task(client)
+    task_id = body["id"]
+
+    paused = False
+    for _ in range(40):
+        detail = (await client.get(f"/api/tasks/{task_id}")).json()
+        if detail["progress_done"] >= 1:
+            r = await client.post(f"/api/tasks/{task_id}/pause")
+            if r.status_code == 200:
+                paused = True
+                break
+            if r.status_code == 409 and detail["status"] == "completed":
+                pytest.skip("task completed before pause; timing too fast")
+        await asyncio.sleep(0.02)
+
+    assert paused, "failed to pause task after at least one item completed"
+
+    detail = (await client.get(f"/api/tasks/{task_id}")).json()
+    config_ids_before = [r["config_id"] for r in detail["results"]]
+    assert len(config_ids_before) == detail["progress_done"]
+
+    r = await client.post(f"/api/tasks/{task_id}/resume")
+    assert r.status_code == 200
+    assert r.json()["status"] == "running"
+
+    status = await scheduler.wait_for_terminal(task_id, timeout=5)
+    assert status == "completed"
+
+    detail = (await client.get(f"/api/tasks/{task_id}")).json()
+    assert detail["progress_done"] == 3
+    assert len(detail["results"]) == 3
+
+    config_ids_after = [r["config_id"] for r in detail["results"]]
+    assert len(config_ids_after) == len(set(config_ids_after))
+    assert config_ids_after[: len(config_ids_before)] == config_ids_before
+
+
+@pytest.mark.asyncio
+async def test_stop_preserves_partial_results(client):
+    await _seed_configs(client, 3)
+    body = await _create_task(client)
+    task_id = body["id"]
+
+    stopped = False
+    for _ in range(40):
+        detail = (await client.get(f"/api/tasks/{task_id}")).json()
+        if detail["status"] in ("stopped", "completed"):
+            break
+        if detail["progress_done"] >= 1:
+            r = await client.post(f"/api/tasks/{task_id}/stop")
+            if r.status_code == 200:
+                stopped = True
+                break
+        await asyncio.sleep(0.02)
+
+    assert stopped, "failed to stop task after at least one item completed"
+
+    status = await scheduler.wait_for_terminal(task_id, timeout=5)
+    assert status == "stopped"
+
+    detail = (await client.get(f"/api/tasks/{task_id}")).json()
+    assert 0 < detail["progress_done"] < detail["progress_total"]
+    assert len(detail["results"]) == detail["progress_done"]
+
+
+@pytest.mark.asyncio
 async def test_pause_on_completed_conflict(client):
     await _seed_configs(client, 3)
     body = await _create_task(client)

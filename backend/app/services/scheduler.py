@@ -100,6 +100,10 @@ async def pause_task(task_id: str) -> DiagnosisTask:
 
 
 async def resume_task(task_id: str) -> DiagnosisTask:
+    ctrl = _get_control(task_id)
+    if ctrl.stop_requested:
+        raise SchedulerConflict("cannot resume task after stop was requested")
+
     async with database.SessionLocal() as session:
         task = await session.get(DiagnosisTask, task_id)
         if task is None:
@@ -112,8 +116,6 @@ async def resume_task(task_id: str) -> DiagnosisTask:
         await session.refresh(task)
         resumed = task
 
-    ctrl = _get_control(task_id)
-    ctrl.stop_requested = False
     ctrl.pause_event.set()
 
     if ctrl.bg_task is None or ctrl.bg_task.done():
