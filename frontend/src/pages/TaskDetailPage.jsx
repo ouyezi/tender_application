@@ -96,6 +96,9 @@ export default function TaskDetailPage() {
           <span className={`status-badge status-${status}`}>{label}</span>
         </div>
         <div className="page-header-actions">
+          <Link className="btn btn-secondary" to={`/workspaces/${task.id}`}>
+            打开工作区
+          </Link>
           {canDownloadInterpret && (
             <a className="btn btn-secondary" href={interpretHtmlUrl(task.id)}>
               下载解读报告
