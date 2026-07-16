@@ -68,6 +68,24 @@ async def _create_task(client: AsyncClient) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_interpret_html_available_after_interpret(client):
+    await _seed_configs(client, 2)
+    body = await _create_task(client)
+    task_id = body["id"]
+
+    status = await scheduler.wait_for_terminal(task_id, timeout=5)
+    assert status == "completed"
+
+    detail = (await client.get(f"/api/tasks/{task_id}")).json()
+    assert "# 招标文件解读报告" in detail["interpret_markdown"]
+
+    r = await client.get(f"/api/tasks/{task_id}/interpret.html")
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+    assert "招标文件解读报告" in r.text
+
+
+@pytest.mark.asyncio
 async def test_completed_task_report_download(client):
     await _seed_configs(client, 2)
     body = await _create_task(client)

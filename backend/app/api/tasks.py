@@ -29,6 +29,15 @@ def _read_report_markdown(task: DiagnosisTask) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _read_interpret_markdown(task: DiagnosisTask) -> str:
+    if not task.interpret_md_path:
+        return ""
+    path = Path(task.interpret_md_path)
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
 def _config_to_dict(row: DiagnosisConfig) -> dict:
     return {
         "id": row.id,
@@ -52,6 +61,7 @@ async def _generate_task_id(db: AsyncSession) -> str:
 def _task_to_out(
     task: DiagnosisTask,
     report_markdown: str = "",
+    interpret_markdown: str = "",
     results: Optional[List] = None,
 ) -> TaskOut:
     if results is None:
@@ -77,6 +87,7 @@ def _task_to_out(
         finished_at=task.finished_at,
         results=results,
         report_markdown=report_markdown,
+        interpret_markdown=interpret_markdown,
     )
 
 
@@ -115,7 +126,7 @@ async def create_task(
         bid_path=bid_path,
         background=background,
         requirements=requirements,
-        status="running",
+        status="interpreting",
         progress_done=0,
         progress_total=len(snapshot),
         config_snapshot=json.dumps(snapshot, ensure_ascii=False),
@@ -139,7 +150,11 @@ async def get_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut:
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return _task_to_out(task, report_markdown=_read_report_markdown(task))
+    return _task_to_out(
+        task,
+        report_markdown=_read_report_markdown(task),
+        interpret_markdown=_read_interpret_markdown(task),
+    )
 
 
 async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
@@ -151,7 +166,11 @@ async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return _task_to_out(task, report_markdown=_read_report_markdown(task))
+    return _task_to_out(
+        task,
+        report_markdown=_read_report_markdown(task),
+        interpret_markdown=_read_interpret_markdown(task),
+    )
 
 
 @router.get("/{task_id}/report.docx")
@@ -168,6 +187,23 @@ async def download_report(task_id: str, db: AsyncSession = Depends(get_db)) -> F
         path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"{task_id}-report.docx",
+    )
+
+
+@router.get("/{task_id}/interpret.html")
+async def download_interpret_html(task_id: str, db: AsyncSession = Depends(get_db)) -> FileResponse:
+    task = await db.get(DiagnosisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if not task.interpret_html_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interpret report not available")
+    path = Path(task.interpret_html_path)
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interpret report not available")
+    return FileResponse(
+        path,
+        media_type="text/html; charset=utf-8",
+        filename=f"{task_id}-interpret.html",
     )
 
 
