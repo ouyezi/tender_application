@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.configs import router as configs_router
 from app.api.tasks import router as tasks_router
 from app.config import REPORT_DIR, UPLOAD_DIR
-from app.db import init_db, recover_interrupted_tasks
+from app.db import init_db, recover_interrupted_parse_jobs, recover_interrupted_tasks
 from app.seed import seed_configs_if_empty
 
 
@@ -17,6 +17,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     await seed_configs_if_empty()
     await recover_interrupted_tasks()
+    await recover_interrupted_parse_jobs()
+    from app.services import parse_scheduler
+
+    await parse_scheduler.kick()
     yield
 
 
