@@ -34,7 +34,13 @@ async def test_create_and_get_task(client):
     r = await client.post("/api/tasks", data=data, files=files)
     assert r.status_code == 201
     body = r.json()
-    assert body["status"] in ("running", "completed", "paused")
+    assert body["status"] in (
+        "running",
+        "interpreting",
+        "diagnosing",
+        "completed",
+        "paused",
+    )
     assert body["tender_filename"] == "tender.pdf"
     assert body["progress_total"] == 1
 

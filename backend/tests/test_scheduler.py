@@ -84,11 +84,11 @@ async def test_pause_resume_completes(client):
                 pytest.skip("task completed before pause; timing too fast")
         await asyncio.sleep(0.02)
 
-    assert paused, "failed to pause task while running"
+    assert paused, "failed to pause task while diagnosing"
 
     r = await client.post(f"/api/tasks/{task_id}/resume")
     assert r.status_code == 200
-    assert r.json()["status"] == "running"
+    assert r.json()["status"] == "diagnosing"
 
     status = await scheduler.wait_for_terminal(task_id, timeout=5)
     assert status == "completed"
@@ -140,7 +140,7 @@ async def test_resume_preserves_progress_no_duplicates(client):
 
     r = await client.post(f"/api/tasks/{task_id}/resume")
     assert r.status_code == 200
-    assert r.json()["status"] == "running"
+    assert r.json()["status"] == "diagnosing"
 
     status = await scheduler.wait_for_terminal(task_id, timeout=5)
     assert status == "completed"
@@ -193,3 +193,58 @@ async def test_pause_on_completed_conflict(client):
 
     r = await client.post(f"/api/tasks/{task_id}/pause")
     assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_interpret_failure_marks_failed_without_diagnosis(client, monkeypatch):
+    async def boom(*_args, **kwargs):
+        raise RuntimeError("interpret boom")
+
+    monkeypatch.setattr(
+        "app.services.scheduler.MockInterpretationAgent.interpret",
+        boom,
+    )
+    await _seed_configs(client, 2)
+    body = await _create_task(client)
+    task_id = body["id"]
+    status = await scheduler.wait_for_terminal(task_id, timeout=5)
+    assert status == "failed"
+    detail = (await client.get(f"/api/tasks/{task_id}")).json()
+    assert detail["results"] == []
+    assert detail.get("interpret_markdown", "") == ""
+    r = await client.get(f"/api/tasks/{task_id}/report.docx")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cannot_pause_while_interpreting(client, monkeypatch):
+    gate = asyncio.Event()
+
+    async def slow_interpret(*_args, **kwargs):
+        await gate.wait()
+        from app.engine.base import InterpretationResult
+
+        return InterpretationResult(markdown="# x\n")
+
+    monkeypatch.setattr(
+        "app.services.scheduler.MockInterpretationAgent.interpret",
+        slow_interpret,
+    )
+    await _seed_configs(client, 1)
+    body = await _create_task(client)
+    task_id = body["id"]
+
+    saw_interpreting = False
+    for _ in range(100):
+        data = (await client.get(f"/api/tasks/{task_id}")).json()
+        if data["status"] == "interpreting":
+            saw_interpreting = True
+            break
+        await asyncio.sleep(0.02)
+    assert saw_interpreting, "never saw interpreting status"
+
+    r = await client.post(f"/api/tasks/{task_id}/pause")
+    assert r.status_code == 409
+
+    gate.set()
+    await scheduler.wait_for_terminal(task_id, timeout=5)

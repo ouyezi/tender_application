@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from app import db as database
-from app.config import MOCK_ITEM_DELAY_SECONDS
+from app.config import MOCK_ITEM_DELAY_SECONDS, MOCK_INTERPRET_DELAY_SECONDS
+from app.engine.interpretation_mock import MockInterpretationAgent
 from app.engine.mock import MockEngine
 from app.models import DiagnosisResult, DiagnosisTask, utcnow
-from app.services import report
+from app.services import interpret_report, report
 
 
 class SchedulerConflict(Exception):
@@ -17,6 +18,7 @@ class SchedulerConflict(Exception):
 
 
 TERMINAL_STATUSES = frozenset({"completed", "stopped", "failed"})
+STOPPABLE_STATUSES = frozenset({"interpreting", "diagnosing", "running", "paused"})
 
 
 @dataclass
@@ -88,7 +90,7 @@ async def pause_task(task_id: str) -> DiagnosisTask:
         task = await session.get(DiagnosisTask, task_id)
         if task is None:
             raise LookupError(task_id)
-        if task.status != "running":
+        if task.status != "diagnosing":
             raise SchedulerConflict(f"cannot pause task in status {task.status}")
         task.status = "paused"
         task.updated_at = utcnow()
@@ -111,7 +113,7 @@ async def resume_task(task_id: str) -> DiagnosisTask:
             raise LookupError(task_id)
         if task.status != "paused":
             raise SchedulerConflict(f"cannot resume task in status {task.status}")
-        task.status = "running"
+        task.status = "diagnosing"
         task.updated_at = utcnow()
         await session.commit()
         await session.refresh(task)
@@ -130,7 +132,7 @@ async def stop_task(task_id: str) -> DiagnosisTask:
         task = await session.get(DiagnosisTask, task_id)
         if task is None:
             raise LookupError(task_id)
-        if task.status not in ("running", "paused"):
+        if task.status not in STOPPABLE_STATUSES:
             raise SchedulerConflict(f"cannot stop task in status {task.status}")
 
     ctrl = _get_control(task_id)
@@ -143,7 +145,7 @@ async def stop_task(task_id: str) -> DiagnosisTask:
             task = await session.get(DiagnosisTask, task_id)
             if task is None:
                 raise LookupError(task_id)
-            if task.status in ("running", "paused"):
+            if task.status in STOPPABLE_STATUSES:
                 task.status = "stopped"
                 task.finished_at = utcnow()
                 task.updated_at = utcnow()
@@ -168,7 +170,7 @@ async def stop_task(task_id: str) -> DiagnosisTask:
         task = await session.get(DiagnosisTask, task_id)
         if task is None:
             raise LookupError(task_id)
-        if task.status in ("running", "paused"):
+        if task.status in STOPPABLE_STATUSES:
             task.status = "stopped"
             task.finished_at = utcnow()
             task.updated_at = utcnow()
@@ -214,10 +216,49 @@ async def _run(task_id: str) -> None:
                 return
             if task.status in TERMINAL_STATUSES:
                 return
+
+            need_interpret = not task.interpret_md_path
+            if need_interpret and task.status not in ("diagnosing", "paused"):
+                task.status = "interpreting"
+                task.updated_at = utcnow()
+                await session.commit()
+
             snapshot: list[dict[str, Any]] = json.loads(task.config_snapshot or "[]")
             start_idx = task.progress_done
             tender_path = task.tender_path
             bid_path = task.bid_path
+            background = task.background or ""
+
+        if need_interpret:
+            if _should_stop(task_id):
+                await _mark_stopped(task_id)
+                return
+
+            agent = MockInterpretationAgent(delay_seconds=MOCK_INTERPRET_DELAY_SECONDS)
+            interpret_result = await agent.interpret(
+                task_id=task_id,
+                tender_path=tender_path,
+                background=background,
+            )
+            md_path, html_path = interpret_report.save_interpret_reports(
+                task_id, interpret_result
+            )
+
+            async with database.SessionLocal() as session:
+                task = await session.get(DiagnosisTask, task_id)
+                if task is None:
+                    return
+                if task.status in TERMINAL_STATUSES:
+                    return
+                task.interpret_md_path = md_path
+                task.interpret_html_path = html_path
+                task.status = "diagnosing"
+                task.updated_at = utcnow()
+                await session.commit()
+
+            if _should_stop(task_id):
+                await _mark_stopped(task_id)
+                return
 
         engine = MockEngine(delay_seconds=MOCK_ITEM_DELAY_SECONDS)
         documents = {"tender_path": tender_path, "bid_path": bid_path}

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html
 import re
-from pathlib import Path
 
 from app.config import REPORT_DIR
 from app.engine.base import InterpretationResult

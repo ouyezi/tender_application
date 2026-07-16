@@ -51,6 +51,8 @@ async def test_recover_interrupted_tasks(tmp_path, monkeypatch):
 
     async with session_factory() as session:
         for task_id, status in [
+            ("task-interpreting", "interpreting"),
+            ("task-diagnosing", "diagnosing"),
             ("task-running", "running"),
             ("task-paused", "paused"),
             ("task-done", "completed"),
@@ -70,9 +72,13 @@ async def test_recover_interrupted_tasks(tmp_path, monkeypatch):
     await recover_interrupted_tasks()
 
     async with session_factory() as session:
+        interpreting = await session.get(DiagnosisTask, "task-interpreting")
+        diagnosing = await session.get(DiagnosisTask, "task-diagnosing")
         running = await session.get(DiagnosisTask, "task-running")
         paused = await session.get(DiagnosisTask, "task-paused")
         done = await session.get(DiagnosisTask, "task-done")
+        assert interpreting.status == "stopped"
+        assert diagnosing.status == "stopped"
         assert running.status == "stopped"
         assert paused.status == "stopped"
         assert done.status == "completed"

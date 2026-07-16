@@ -24,7 +24,11 @@ async def recover_interrupted_tasks() -> None:
     async with SessionLocal() as session:
         await session.execute(
             update(DiagnosisTask)
-            .where(DiagnosisTask.status.in_(["running", "paused"]))
+            .where(
+                DiagnosisTask.status.in_(
+                    ["interpreting", "diagnosing", "running", "paused"]
+                )
+            )
             .values(status="stopped", updated_at=utcnow())
         )
         await session.commit()
