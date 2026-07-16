@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
 from app.schemas import TaskListOut, TaskOut
-from app.services import files, scheduler
+from app.services import files, scheduler, workspace
 from app.services.scheduler import SchedulerConflict
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -132,6 +132,17 @@ async def create_task(
         config_snapshot=json.dumps(snapshot, ensure_ascii=False),
     )
     db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    await workspace.register_task_documents(
+        db,
+        task_id=task_id,
+        tender_path=tender_path,
+        tender_filename=tender_filename,
+        bid_path=bid_path,
+        bid_filename=bid_filename,
+    )
     await db.commit()
     await db.refresh(task)
 
