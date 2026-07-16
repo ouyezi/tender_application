@@ -21,9 +21,24 @@ python3 -m venv .venv
 cd frontend && npm install
 ```
 
-## 启动后端
+## 一键启动（推荐）
 
 在项目根目录执行：
+
+```bash
+.venv/bin/python startup.py
+```
+
+脚本会：
+
+1. 检查虚拟环境与前端依赖（缺 `node_modules` 时自动 `npm install`）
+2. 启动后端（`:8000`）与前端（`:5173`）
+3. 等待服务就绪后打开浏览器
+4. 在 macOS 上会弹出两个 Terminal 窗口分别跑前后端；其他系统在当前终端托管，`Ctrl+C` 停止
+
+## 分别启动
+
+### 后端
 
 ```bash
 .venv/bin/uvicorn app.main:app --reload --app-dir backend --port 8000
@@ -33,7 +48,7 @@ cd frontend && npm install
 - 健康检查：`GET /api/health` → `{"ok": true}`
 - 首次启动若配置表为空，会自动写入 3 条示例诊断配置（企业资质核验、目录完整性、偏差表响应）
 
-## 启动前端
+### 前端
 
 ```bash
 cd frontend && npm install && npm run dev
