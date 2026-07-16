@@ -34,6 +34,22 @@ def die(msg: str, code: int = 1) -> None:
     sys.exit(code)
 
 
+def lan_ips() -> list[str]:
+    """列出本机非回环 IPv4，便于局域网访问。"""
+    ips: list[str] = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
+    except OSError:
+        pass
+    primary = lan_ip()
+    if primary != "127.0.0.1" and primary not in ips:
+        ips.insert(0, primary)
+    return ips
+
+
 def lan_ip() -> str:
     """探测用于局域网访问的本机 IP（失败则回退 127.0.0.1）。"""
     try:
@@ -45,13 +61,20 @@ def lan_ip() -> str:
 
 
 def print_access_urls() -> None:
-    ip = lan_ip()
     print(f"[startup] 本机前端:  {LOCAL_FRONTEND_URL}")
     print(f"[startup] 本机 API:   http://127.0.0.1:{BACKEND_PORT}/docs")
-    if ip != "127.0.0.1":
-        print(f"[startup] 局域网前端: http://{ip}:{FRONTEND_PORT}")
-        print(f"[startup] 局域网 API:  http://{ip}:{BACKEND_PORT}/docs")
-        print(f"[startup] 若外机无法访问，请检查本机防火墙是否放行 {FRONTEND_PORT}/{BACKEND_PORT}")
+    ips = lan_ips()
+    if ips:
+        print("[startup] 局域网访问（其他机器用下面地址）:")
+        for ip in ips:
+            print(f"[startup]   前端 http://{ip}:{FRONTEND_PORT}")
+            print(f"[startup]   API  http://{ip}:{BACKEND_PORT}/docs")
+        print(
+            f"[startup] 已监听 {BIND_HOST}:{FRONTEND_PORT} / {BIND_HOST}:{BACKEND_PORT}；"
+            f"若外机不通，请放行防火墙端口 {FRONTEND_PORT}/{BACKEND_PORT}"
+        )
+    else:
+        print("[startup] 未探测到局域网 IP，仅本机可访问")
 
 
 def ensure_venv() -> None:
