@@ -33,3 +33,12 @@ def test_numbering_levels():
     nodes = flatten_nodes(build_document_tree(md))
     purpose = next(n for n in nodes if "目的" in n["title"])
     assert purpose["numbering"].startswith("1.1") or purpose["level"] >= 2
+
+
+def test_no_headings_fallback():
+    tree = build_document_tree("just plain text, no headings at all.")
+    assert "no_headings" in tree["warnings"]
+    assert len(tree["nodes"]) == 1
+    node = tree["nodes"][0]
+    assert node["title"] == "全文"
+    assert node["source"] == "heading"

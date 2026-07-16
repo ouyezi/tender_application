@@ -243,7 +243,7 @@ def build_document_tree(markdown: str) -> dict[str, Any]:
             start_offset=0,
             end_offset=end,
             self_start=0,
-            source="fallback",
+            source="heading",
         )
         warnings.append("no_headings")
         return {"nodes": [node], "warnings": warnings}
