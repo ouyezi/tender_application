@@ -72,6 +72,13 @@ a:hover {
   flex-wrap: wrap;
 }
 
+.page-header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .header-link {
   font-size: 0.9rem;
   font-weight: 500;
@@ -698,6 +705,28 @@ a:hover {
   margin: 0.85rem 0 0;
   font-size: 0.875rem;
   color: var(--text-muted);
+}
+
+.report-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border, #ddd);
+  margin-bottom: 1rem;
+}
+
+.report-tab {
+  background: none;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  color: inherit;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.report-tab.active {
+  border-bottom-color: var(--accent, #2563eb);
+  font-weight: 600;
 }
 
 .report-pending {

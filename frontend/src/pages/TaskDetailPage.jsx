@@ -1,24 +1,27 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { fileUrl, getTask, reportDocxUrl } from '../api'
+import { fileUrl, getTask, interpretHtmlUrl, reportDocxUrl } from '../api'
 import MarkdownPreview from '../components/MarkdownPreview'
 import ResultTable from '../components/ResultTable'
 
 const STATUS_LABELS = {
-  running: '诊断中',
+  interpreting: '解读中',
+  diagnosing: '诊断中',
+  running: '诊断中', // legacy
   paused: '已暂停',
   completed: '已完成',
   stopped: '已停止',
   failed: '失败',
 }
 
-const POLL_STATUSES = new Set(['running', 'paused'])
+const POLL_STATUSES = new Set(['interpreting', 'diagnosing', 'running', 'paused'])
 
 export default function TaskDetailPage() {
   const { id } = useParams()
   const [task, setTask] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [reportTab, setReportTab] = useState('interpret')
 
   const load = useCallback(
     async (silent = false) => {
@@ -79,9 +82,8 @@ export default function TaskDetailPage() {
 
   const status = task.status || 'running'
   const label = STATUS_LABELS[status] || status
-  const isInProgress = POLL_STATUSES.has(status)
-  const hasReport = Boolean(task.report_markdown)
   const results = task.results || []
+  const canDownloadInterpret = Boolean(task.interpret_html_path || task.interpret_markdown)
 
   return (
     <main className="page task-detail-page">
@@ -93,11 +95,18 @@ export default function TaskDetailPage() {
           <h1>任务详情</h1>
           <span className={`status-badge status-${status}`}>{label}</span>
         </div>
-        {status === 'completed' && (
-          <a className="btn btn-primary" href={reportDocxUrl(task.id)}>
-            下载报告
-          </a>
-        )}
+        <div className="page-header-actions">
+          {canDownloadInterpret && (
+            <a className="btn btn-secondary" href={interpretHtmlUrl(task.id)}>
+              下载解读报告
+            </a>
+          )}
+          {status === 'completed' && (
+            <a className="btn btn-primary" href={reportDocxUrl(task.id)}>
+              下载诊断报告
+            </a>
+          )}
+        </div>
       </header>
 
       {error && <p className="page-error">{error}</p>}
@@ -148,10 +157,50 @@ export default function TaskDetailPage() {
 
       <section className="detail-section">
         <h2>报告预览</h2>
-        {isInProgress && !hasReport ? (
-          <p className="report-pending">诊断进行中，报告将在全部完成后生成</p>
-        ) : hasReport ? (
+        <div className="report-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={reportTab === 'interpret'}
+            className={reportTab === 'interpret' ? 'report-tab active' : 'report-tab'}
+            onClick={() => setReportTab('interpret')}
+          >
+            解读报告
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={reportTab === 'diagnosis'}
+            className={reportTab === 'diagnosis' ? 'report-tab active' : 'report-tab'}
+            onClick={() => setReportTab('diagnosis')}
+          >
+            诊断报告
+          </button>
+        </div>
+
+        {reportTab === 'interpret' ? (
+          status === 'interpreting' && !task.interpret_markdown ? (
+            <p className="report-pending">招标文件解读中…</p>
+          ) : task.interpret_markdown ? (
+            <MarkdownPreview markdown={task.interpret_markdown} />
+          ) : status === 'failed' ? (
+            <p className="page-error">{task.error_message || '解读失败'}</p>
+          ) : status === 'stopped' ? (
+            <p className="empty-state-hint">已停止，暂无报告</p>
+          ) : (
+            <p className="empty-state-hint">暂无解读报告</p>
+          )
+        ) : status === 'interpreting' ? (
+          <p className="report-pending">解读完成后开始诊断</p>
+        ) : (status === 'diagnosing' || status === 'running' || status === 'paused') &&
+          !task.report_markdown ? (
+          <p className="report-pending">诊断进行中…</p>
+        ) : task.report_markdown ? (
           <MarkdownPreview markdown={task.report_markdown} />
+        ) : status === 'failed' && !task.interpret_markdown ? (
+          <p className="empty-state-hint">未开始诊断</p>
+        ) : status === 'failed' ? (
+          <p className="page-error">{task.error_message || '诊断失败'}</p>
         ) : (
           <p className="empty-state-hint">暂无报告</p>
         )}
