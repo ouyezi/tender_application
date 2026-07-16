@@ -4,7 +4,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import DATABASE_URL
-from app.models import Base, DiagnosisTask
+from app.models import Base, DiagnosisTask, utcnow
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -25,6 +25,6 @@ async def recover_interrupted_tasks() -> None:
         await session.execute(
             update(DiagnosisTask)
             .where(DiagnosisTask.status.in_(["running", "paused"]))
-            .values(status="stopped")
+            .values(status="stopped", updated_at=utcnow())
         )
         await session.commit()

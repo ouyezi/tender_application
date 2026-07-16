@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.configs import router as configs_router
 from app.config import REPORT_DIR, UPLOAD_DIR
 from app.db import init_db, recover_interrupted_tasks
 
@@ -17,6 +18,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Tender Diagnosis Demo", lifespan=lifespan)
+app.include_router(configs_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
