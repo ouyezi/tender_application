@@ -80,3 +80,52 @@ async def test_run_parse_pipeline_unsupported_extension_fails(tmp_path, monkeypa
 
     assert result["status"] == "failed"
     assert result["error"] is not None
+
+
+async def test_run_parse_pipeline_convert_failure_returns_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(artifact, "UPLOAD_DIR", tmp_path)
+
+    task_id = "T-TEST-PIPE-003"
+    file_id = "fdoc003"
+    artifact.ensure_artifact_dirs(task_id)
+
+    src_path = artifact.artifact_root(task_id) / "document" / f"{file_id}_sample.docx"
+    src_path.parent.mkdir(parents=True, exist_ok=True)
+    _make_sample_docx(src_path)
+
+    def _boom(_path, _image_dir):
+        raise RuntimeError("corrupt docx")
+
+    monkeypatch.setattr(pipeline.convert_mod, "convert_docx_to_markdown", _boom)
+
+    result = await pipeline.run_parse_pipeline(file_id, task_id, str(src_path))
+
+    assert result["status"] == "failed"
+    assert result["error"] is not None
+    assert "convert_failed" in result["error"]
+
+
+async def test_run_parse_pipeline_table_warnings_returns_partial(tmp_path, monkeypatch):
+    monkeypatch.setattr(artifact, "UPLOAD_DIR", tmp_path)
+
+    task_id = "T-TEST-PIPE-004"
+    file_id = "fdoc004"
+    artifact.ensure_artifact_dirs(task_id)
+
+    src_path = artifact.artifact_root(task_id) / "document" / f"{file_id}_sample.docx"
+    src_path.parent.mkdir(parents=True, exist_ok=True)
+    _make_sample_docx(src_path)
+
+    def _warn(_path, _out_dir):
+        return [], ["table_extract_failed:tbl_001:boom"]
+
+    monkeypatch.setattr(pipeline.extract_mod, "extract_tables_from_docx", _warn)
+
+    result = await pipeline.run_parse_pipeline(file_id, task_id, str(src_path))
+
+    assert result["status"] == "partial"
+    assert result["error"] is None
+    assert any("table_extract_failed" in w for w in result["warnings"])
+    assert Path(result["md_path"]).is_file()
+    assert Path(result["tree_path"]).is_file()
+    assert Path(result["chunks_path"]).is_file()
