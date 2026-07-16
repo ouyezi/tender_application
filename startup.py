@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""一键启动标书诊断 Demo（后端 FastAPI + 前端 Vite）。"""
+"""一键启动标书诊断 Demo（后端 FastAPI + 前端 Vite）。
+
+默认监听 0.0.0.0，局域网内其他机器可通过本机 IP 访问。
+"""
 
 from __future__ import annotations
 
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -18,14 +22,34 @@ VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 VENV_UVICORN = ROOT / ".venv" / "bin" / "uvicorn"
 BACKEND_PORT = 8000
 FRONTEND_PORT = 5173
+BIND_HOST = "0.0.0.0"
 HEALTH_URL = f"http://127.0.0.1:{BACKEND_PORT}/api/health"
-FRONTEND_URL = f"http://localhost:{FRONTEND_PORT}"
-DOCS_URL = f"http://localhost:{BACKEND_PORT}/docs"
+LOCAL_FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}"
 
 
 def die(msg: str, code: int = 1) -> None:
     print(f"[startup] ERROR: {msg}", file=sys.stderr)
     sys.exit(code)
+
+
+def lan_ip() -> str:
+    """探测用于局域网访问的本机 IP（失败则回退 127.0.0.1）。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
+def print_access_urls() -> None:
+    ip = lan_ip()
+    print(f"[startup] 本机前端:  {LOCAL_FRONTEND_URL}")
+    print(f"[startup] 本机 API:   http://127.0.0.1:{BACKEND_PORT}/docs")
+    if ip != "127.0.0.1":
+        print(f"[startup] 局域网前端: http://{ip}:{FRONTEND_PORT}")
+        print(f"[startup] 局域网 API:  http://{ip}:{BACKEND_PORT}/docs")
+        print("[startup] 若外机无法访问，请检查本机防火墙是否放行 5173/8000")
 
 
 def ensure_venv() -> None:
@@ -74,11 +98,11 @@ def open_macos_terminals() -> bool:
     backend_line = (
         f"cd {_as_escape(str(ROOT))} && "
         f"{_as_escape(str(VENV_UVICORN))} app.main:app --reload "
-        f"--app-dir backend --port {BACKEND_PORT}"
+        f"--app-dir backend --host {BIND_HOST} --port {BACKEND_PORT}"
     )
     frontend_line = (
         f"cd {_as_escape(str(ROOT / 'frontend'))} && "
-        f"npm run dev -- --port {FRONTEND_PORT} --host 127.0.0.1"
+        f"npm run dev -- --port {FRONTEND_PORT} --host {BIND_HOST}"
     )
     script = f'''
 tell application "Terminal"
@@ -101,6 +125,8 @@ def run_managed() -> None:
             "--reload",
             "--app-dir",
             "backend",
+            "--host",
+            BIND_HOST,
             "--port",
             str(BACKEND_PORT),
         ],
@@ -108,7 +134,7 @@ def run_managed() -> None:
         env=env,
     )
     frontend = subprocess.Popen(
-        ["npm", "run", "dev", "--", "--port", str(FRONTEND_PORT), "--host", "127.0.0.1"],
+        ["npm", "run", "dev", "--", "--port", str(FRONTEND_PORT), "--host", BIND_HOST],
         cwd=ROOT / "frontend",
         env=env,
     )
@@ -135,10 +161,9 @@ def run_managed() -> None:
     signal.signal(signal.SIGTERM, shutdown)
 
     wait_http(HEALTH_URL, label="后端")
-    wait_http(FRONTEND_URL, label="前端")
-    print(f"[startup] 前端: {FRONTEND_URL}")
-    print(f"[startup] API 文档: {DOCS_URL}")
-    webbrowser.open(FRONTEND_URL)
+    wait_http(LOCAL_FRONTEND_URL, label="前端")
+    print_access_urls()
+    webbrowser.open(LOCAL_FRONTEND_URL)
     print("[startup] 按 Ctrl+C 停止")
 
     while True:
@@ -154,15 +179,14 @@ def main() -> None:
     ensure_venv()
     ensure_frontend_deps()
 
-    print("[startup] 启动后端与前端...")
+    print(f"[startup] 启动后端与前端（监听 {BIND_HOST}）...")
 
     if open_macos_terminals():
         wait_http(HEALTH_URL, label="后端")
-        wait_http(FRONTEND_URL, label="前端")
-        print(f"[startup] 前端: {FRONTEND_URL}")
-        print(f"[startup] API 文档: {DOCS_URL}")
+        wait_http(LOCAL_FRONTEND_URL, label="前端")
+        print_access_urls()
         print("[startup] 已在 Terminal.app 中弹出两个窗口")
-        webbrowser.open(FRONTEND_URL)
+        webbrowser.open(LOCAL_FRONTEND_URL)
         return
 
     run_managed()

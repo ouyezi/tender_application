@@ -32,29 +32,33 @@ cd frontend && npm install
 脚本会：
 
 1. 检查虚拟环境与前端依赖（缺 `node_modules` 时自动 `npm install`）
-2. 启动后端（`:8000`）与前端（`:5173`）
-3. 等待服务就绪后打开浏览器
+2. 启动后端（`0.0.0.0:8000`）与前端（`0.0.0.0:5173`），**局域网可访问**
+3. 等待服务就绪后打印本机/局域网地址并打开浏览器
 4. 在 macOS 上会弹出两个 Terminal 窗口分别跑前后端；其他系统在当前终端托管，`Ctrl+C` 停止
+
+同网段其他机器访问：`http://<本机局域网IP>:5173`（启动日志会打印具体地址）。若连不上，检查系统防火墙是否放行 **5173** / **8000**。
+
+> 注意：无鉴权，仅建议在可信局域网内使用，不要直接暴露到公网。
 
 ## 分别启动
 
 ### 后端
 
 ```bash
-.venv/bin/uvicorn app.main:app --reload --app-dir backend --port 8000
+.venv/bin/uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8000
 ```
 
-- API 文档：`http://localhost:8000/docs`
+- API 文档：`http://localhost:8000/docs` 或 `http://<局域网IP>:8000/docs`
 - 健康检查：`GET /api/health` → `{"ok": true}`
 - 首次启动若配置表为空，会自动写入 3 条示例诊断配置（企业资质核验、目录完整性、偏差表响应）
 
 ### 前端
 
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
-前端默认运行在 `http://localhost:5173`，通过 Vite 代理访问后端 `/api`。
+前端默认监听 `0.0.0.0:5173`，通过 Vite 代理把 `/api` 转到本机后端。
 
 | 页面 | 路径 |
 |---|---|

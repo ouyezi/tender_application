@@ -23,10 +23,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Tender Diagnosis Demo", lifespan=lifespan)
 app.include_router(configs_router)
 app.include_router(tasks_router)
+# Demo 无鉴权：允许局域网其他机器通过本机 IP 访问前端时的跨域请求
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
