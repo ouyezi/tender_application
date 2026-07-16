@@ -237,10 +237,11 @@ def _find_node(nodes: list[dict[str, Any]], node_id: str) -> Optional[dict[str, 
 
 
 def get_content(wf: WorkspaceFile, node_id: str) -> dict[str, Any]:
-    """Return the markdown slice (by ``start_offset:end_offset``) for one section.
+    """Return markdown for a tree node, including descendant sections.
 
-    Raises ``FileNotFoundError`` if the file hasn't been parsed yet, and
-    ``LookupError`` if ``node_id`` doesn't exist in the tree.
+    Slice uses ``self_start:subtree_end`` so clicking a parent heading shows
+    its own body plus all child chapters (not only the gap before the first
+    child). Raises ``FileNotFoundError`` / ``LookupError`` when missing.
     """
     if not wf.tree_path or not Path(wf.tree_path).is_file():
         raise FileNotFoundError("tree_not_found")
@@ -252,10 +253,25 @@ def get_content(wf: WorkspaceFile, node_id: str) -> dict[str, Any]:
     if node is None:
         raise LookupError("node_not_found")
 
+    self_start = int(node.get("self_start", node.get("start_offset", 0)))
+    subtree_end = int(node.get("subtree_end", node.get("end_offset", 0)))
+    section_start = int(node.get("start_offset", self_start))
+    section_end = int(node.get("end_offset", subtree_end))
+
     markdown = Path(wf.md_path).read_text(encoding="utf-8")
-    section = markdown[node["start_offset"] : node["end_offset"]]
+    section = markdown[self_start:subtree_end]
     section = _rewrite_artifact_links(section, wf.task_id)
-    return {"node_id": node_id, "title": node.get("title", ""), "markdown": section}
+    return {
+        "node_id": node_id,
+        "title": node.get("title", ""),
+        "markdown": section,
+        "start_offset": self_start,
+        "end_offset": subtree_end,
+        "self_start": self_start,
+        "subtree_end": subtree_end,
+        "section_start": section_start,
+        "section_end": section_end,
+    }
 
 
 def _aggregate_counts(files: list[WorkspaceFile]) -> dict[str, int]:
@@ -293,6 +309,22 @@ async def list_workspaces(session: AsyncSession) -> list[dict[str, Any]]:
     return items
 
 
+def _enrich_parse_error_from_meta(wf: WorkspaceFile) -> None:
+    """Fill empty parse_error for partial files from meta.json (legacy rows)."""
+    if wf.parse_status != "partial" or wf.parse_error:
+        return
+    meta_path = artifact.artifact_root(wf.task_id) / "json" / f"{wf.id}.meta.json"
+    if not meta_path.is_file():
+        return
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    warnings = meta.get("warnings") or []
+    if warnings:
+        wf.parse_error = "; ".join(warnings)
+
+
 async def get_workspace_detail(session: AsyncSession, task_id: str) -> Optional[dict[str, Any]]:
     task = await session.get(DiagnosisTask, task_id)
     if task is None:
@@ -304,6 +336,8 @@ async def get_workspace_detail(session: AsyncSession, task_id: str) -> Optional[
             .order_by(WorkspaceFile.created_at.asc())
         )
     ).scalars().all()
+    for wf in files:
+        _enrich_parse_error_from_meta(wf)
     return {
         "task_id": task.id,
         "tender_filename": task.tender_filename,

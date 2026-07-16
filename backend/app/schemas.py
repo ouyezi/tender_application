@@ -139,3 +139,11 @@ class ContentOut(BaseModel):
     node_id: str
     title: str
     markdown: str
+    # 当前返回正文切片的起止（含子孙：self_start → subtree_end）
+    start_offset: int = 0
+    end_offset: int = 0
+    self_start: int = 0
+    subtree_end: int = 0
+    # 仅本节正文（不含子章节）的起止，便于对照
+    section_start: int = 0
+    section_end: int = 0

@@ -5,7 +5,21 @@ export default function MarkdownPreview({ markdown }) {
 
   return (
     <div className="markdown-preview">
-      <ReactMarkdown>{markdown}</ReactMarkdown>
+      <ReactMarkdown
+        components={{
+          img: ({ src, alt, ...props }) => (
+            <img
+              src={src}
+              alt={alt || ''}
+              loading="lazy"
+              className="markdown-preview-img"
+              {...props}
+            />
+          ),
+        }}
+      >
+        {markdown}
+      </ReactMarkdown>
     </div>
   )
 }

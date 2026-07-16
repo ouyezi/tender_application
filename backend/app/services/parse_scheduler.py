@@ -160,7 +160,12 @@ async def _run_job(job_id: int) -> None:
         wf = await session.get(WorkspaceFile, file_id)
         if wf is not None:
             wf.parse_status = result["status"]
-            wf.parse_error = result.get("error")
+            # Surface non-fatal warnings on partial so the UI can explain the badge.
+            err = result.get("error")
+            warnings = result.get("warnings") or []
+            if not err and result["status"] == "partial" and warnings:
+                err = "; ".join(warnings)
+            wf.parse_error = err
             wf.md_path = result.get("md_path")
             wf.tree_path = result.get("tree_path")
             wf.chunks_path = result.get("chunks_path")

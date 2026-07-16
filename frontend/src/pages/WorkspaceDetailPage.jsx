@@ -62,6 +62,7 @@ export default function WorkspaceDetailPage() {
 
   const [selectedNode, setSelectedNode] = useState(null)
   const [contentMarkdown, setContentMarkdown] = useState('')
+  const [contentMeta, setContentMeta] = useState(null)
   const [contentLoading, setContentLoading] = useState(false)
   const [contentError, setContentError] = useState('')
 
@@ -99,12 +100,21 @@ export default function WorkspaceDetailPage() {
       setSelectedNode(node)
       setContentError('')
       setContentLoading(true)
+      setContentMeta(null)
       try {
         const data = await getWorkspaceContent(taskId, file.id, node.id)
         setContentMarkdown(data?.markdown || '')
+        setContentMeta({
+          title: data?.title || node.title || '',
+          start_offset: data?.start_offset ?? node.self_start ?? 0,
+          end_offset: data?.end_offset ?? node.subtree_end ?? 0,
+          section_start: data?.section_start ?? node.start_offset ?? 0,
+          section_end: data?.section_end ?? node.end_offset ?? 0,
+        })
       } catch (err) {
         setContentError(err.message || '加载内容失败')
         setContentMarkdown('')
+        setContentMeta(null)
       } finally {
         setContentLoading(false)
       }
@@ -118,6 +128,7 @@ export default function WorkspaceDetailPage() {
       setSelectedFile(file)
       setSelectedNode(null)
       setContentMarkdown('')
+      setContentMeta(null)
       setContentError('')
       setTreeNodes([])
       setTreeError('')
@@ -225,9 +236,24 @@ export default function WorkspaceDetailPage() {
                           <td title={file.original_filename}>{file.original_filename}</td>
                           <td>{file.ext || '—'}</td>
                           <td>
-                            <span className={`parse-status-badge parse-status-${file.parse_status}`}>
+                            <span
+                              className={`parse-status-badge parse-status-${file.parse_status}`}
+                              title={file.parse_error || undefined}
+                            >
                               {PARSE_STATUS_LABELS[file.parse_status] || file.parse_status}
                             </span>
+                            {file.parse_status === 'partial' && (
+                              <div className="parse-status-hint" title={file.parse_error || ''}>
+                                {file.parse_error
+                                  ? `部分表格抽取失败：${file.parse_error}`
+                                  : '正文/目录已可用；部分表格抽取失败，可重试'}
+                              </div>
+                            )}
+                            {file.parse_status === 'failed' && file.parse_error && (
+                              <div className="parse-status-hint" title={file.parse_error}>
+                                {file.parse_error}
+                              </div>
+                            )}
                           </td>
                           <td className="admin-task-time">{formatDate(file.updated_at)}</td>
                           <td className="admin-table-actions" onClick={(e) => e.stopPropagation()}>
@@ -282,8 +308,34 @@ export default function WorkspaceDetailPage() {
                     <p className="empty-state-hint">加载内容中…</p>
                   ) : contentError ? (
                     <p className="page-error">{contentError}</p>
-                  ) : contentMarkdown ? (
-                    <MarkdownPreview markdown={contentMarkdown} />
+                  ) : contentMarkdown || contentMeta ? (
+                    <>
+                      {contentMeta && (
+                        <div className="content-offset-meta">
+                          <div className="content-offset-title">
+                            {contentMeta.title || '当前章节'}
+                          </div>
+                          <div className="content-offset-ranges">
+                            <span>
+                              展示范围（含子章节）：
+                              <code>
+                                {contentMeta.start_offset} – {contentMeta.end_offset}
+                              </code>
+                              <span className="content-offset-len">
+                                （{Math.max(0, contentMeta.end_offset - contentMeta.start_offset)} 字符）
+                              </span>
+                            </span>
+                            <span>
+                              本节正文：
+                              <code>
+                                {contentMeta.section_start} – {contentMeta.section_end}
+                              </code>
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                      <MarkdownPreview markdown={contentMarkdown} />
+                    </>
                   ) : (
                     <p className="empty-state-hint">选择左侧目录节点查看内容</p>
                   )}

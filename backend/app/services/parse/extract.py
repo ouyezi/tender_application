@@ -45,13 +45,23 @@ def _escape_html(text: str) -> str:
     )
 
 
+def _safe_cell(table: Any, r: int, c: int) -> Any | None:
+    """Return ``table.cell(r, c)`` or ``None`` when the grid is irregular."""
+    try:
+        return table.cell(r, c)
+    except (IndexError, ValueError):
+        return None
+
+
 def _table_to_html(table: Any) -> str:
     n_rows = len(table.rows)
     n_cols = len(table.columns)
     if n_rows == 0 or n_cols == 0:
         return "<table></table>\n"
 
-    grid = [[table.cell(r, c) for c in range(n_cols)] for r in range(n_rows)]
+    grid: list[list[Any | None]] = [
+        [_safe_cell(table, r, c) for c in range(n_cols)] for r in range(n_rows)
+    ]
     visited: set[int] = set()
     row_htmls: list[str] = []
 
@@ -59,21 +69,33 @@ def _table_to_html(table: Any) -> str:
         cell_htmls: list[str] = []
         for c in range(n_cols):
             cell = grid[r][c]
+            if cell is None:
+                continue
             key = id(cell._tc)
             if key in visited:
                 continue
 
             colspan = 1
-            while c + colspan < n_cols and id(grid[r][c + colspan]._tc) == key:
+            while (
+                c + colspan < n_cols
+                and grid[r][c + colspan] is not None
+                and id(grid[r][c + colspan]._tc) == key
+            ):
                 colspan += 1
 
             rowspan = 1
-            while r + rowspan < n_rows and id(grid[r + rowspan][c]._tc) == key:
+            while (
+                r + rowspan < n_rows
+                and grid[r + rowspan][c] is not None
+                and id(grid[r + rowspan][c]._tc) == key
+            ):
                 rowspan += 1
 
             for rr in range(r, r + rowspan):
                 for cc in range(c, c + colspan):
-                    visited.add(id(grid[rr][cc]._tc))
+                    other = grid[rr][cc]
+                    if other is not None:
+                        visited.add(id(other._tc))
 
             attrs = ""
             if rowspan > 1:

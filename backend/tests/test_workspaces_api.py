@@ -71,7 +71,10 @@ async def _write_fake_parse(task_id: str, file_id: str, markdown: str, tree: dic
 
 def _sample_tree(markdown: str) -> dict:
     purpose_start = markdown.index("阐明")
-    heading_start = markdown.index("## 目的")
+    child_heading = markdown.index("## 目的")
+    # Parent section body ends where the child heading begins (classic empty-gap case
+    # if there were no intro text — here intro ends just before "## 目的").
+    root_section_start = markdown.index("第一章")
     return {
         "nodes": [
             {
@@ -80,8 +83,8 @@ def _sample_tree(markdown: str) -> dict:
                 "level": 1,
                 "numbering": None,
                 "parent_id": None,
-                "start_offset": 0,
-                "end_offset": len(markdown),
+                "start_offset": root_section_start,
+                "end_offset": child_heading,
                 "self_start": 0,
                 "subtree_end": len(markdown),
                 "source": "heading",
@@ -94,7 +97,7 @@ def _sample_tree(markdown: str) -> dict:
                         "parent_id": "n_root",
                         "start_offset": purpose_start,
                         "end_offset": len(markdown),
-                        "self_start": heading_start,
+                        "self_start": child_heading,
                         "subtree_end": len(markdown),
                         "source": "heading",
                         "children": [],
@@ -186,6 +189,7 @@ async def test_tree_and_content(client, monkeypatch):
     assert nodes[0]["children"][0]["id"] == "n_child"
 
     child = tree["nodes"][0]["children"][0]
+    root = tree["nodes"][0]
     r2 = await client.get(
         f"/api/workspaces/{task_id}/files/{file_id}/content",
         params={"node_id": "n_child"},
@@ -193,7 +197,23 @@ async def test_tree_and_content(client, monkeypatch):
     assert r2.status_code == 200
     content = r2.json()
     assert content["title"] == "目的"
-    assert content["markdown"] == markdown[child["start_offset"] : child["end_offset"]]
+    # Content uses subtree span (self_start → subtree_end), not section-only.
+    assert content["markdown"] == markdown[child["self_start"] : child["subtree_end"]]
+    assert content["start_offset"] == child["self_start"]
+    assert content["end_offset"] == child["subtree_end"]
+    assert content["section_start"] == child["start_offset"]
+    assert content["section_end"] == child["end_offset"]
+
+    # Parent heading must include descendant body (not only the gap before first child).
+    r3 = await client.get(
+        f"/api/workspaces/{task_id}/files/{file_id}/content",
+        params={"node_id": "n_root"},
+    )
+    assert r3.status_code == 200
+    parent = r3.json()
+    assert "阐明目的" in parent["markdown"]
+    assert parent["markdown"] == markdown[root["self_start"] : root["subtree_end"]]
+    assert parent["end_offset"] == root["subtree_end"]
 
 
 @pytest.mark.asyncio

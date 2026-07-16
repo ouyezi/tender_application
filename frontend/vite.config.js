@@ -9,6 +9,10 @@ export default defineConfig({
     strictPort: true,
     // 允许通过任意 IP / 主机名访问（局域网「全局」访问）
     allowedHosts: true,
-    proxy: { '/api': 'http://127.0.0.1:8888' },
+    proxy: {
+      '/api': 'http://127.0.0.1:8888',
+      // 工作区解析产物（图片/表格）挂在后端，需与 /api 一并转发
+      '/artifact-files': 'http://127.0.0.1:8888',
+    },
   },
 })
