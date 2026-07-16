@@ -22,8 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 VENV_UVICORN = ROOT / ".venv" / "bin" / "uvicorn"
-BACKEND_PORT = 8000
-FRONTEND_PORT = 5173
+BACKEND_PORT = 8888
+FRONTEND_PORT = 5555
 BIND_HOST = "0.0.0.0"
 HEALTH_URL = f"http://127.0.0.1:{BACKEND_PORT}/api/health"
 LOCAL_FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}"
@@ -51,7 +51,7 @@ def print_access_urls() -> None:
     if ip != "127.0.0.1":
         print(f"[startup] 局域网前端: http://{ip}:{FRONTEND_PORT}")
         print(f"[startup] 局域网 API:  http://{ip}:{BACKEND_PORT}/docs")
-        print("[startup] 若外机无法访问，请检查本机防火墙是否放行 5173/8000")
+        print(f"[startup] 若外机无法访问，请检查本机防火墙是否放行 {FRONTEND_PORT}/{BACKEND_PORT}")
 
 
 def ensure_venv() -> None:
@@ -73,19 +73,63 @@ def ensure_frontend_deps() -> None:
         die("npm install 失败")
 
 
-def wait_http(url: str, timeout: float = 45.0, label: str = "service") -> None:
+def port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def ensure_ports_free() -> None:
+    busy = [p for p in (BACKEND_PORT, FRONTEND_PORT) if port_in_use(p)]
+    if not busy:
+        return
+    detail = "、".join(str(p) for p in busy)
+    die(
+        f"端口被占用: {detail}。\n"
+        f"  本项目需要后端 {BACKEND_PORT}、前端 {FRONTEND_PORT}。\n"
+        f"  请先结束占用进程后再启动，例如：\n"
+        f"    lsof -iTCP:{BACKEND_PORT} -sTCP:LISTEN\n"
+        f"    kill <PID>\n"
+        f"  可用 lsof -iTCP:{FRONTEND_PORT} -sTCP:LISTEN 查看前端端口占用。"
+    )
+
+
+def wait_backend(timeout: float = 45.0) -> None:
     deadline = time.time() + timeout
     last_err = ""
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=1.5) as resp:
-                if 200 <= resp.status < 500:
-                    print(f"[startup] {label} 就绪: {url}")
+            with urllib.request.urlopen(HEALTH_URL, timeout=1.5) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                if resp.status == 200 and '"ok"' in body:
+                    print(f"[startup] 后端就绪: {HEALTH_URL}")
                     return
+                last_err = f"HTTP {resp.status} body={body[:120]}"
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             last_err = str(e)
         time.sleep(0.4)
-    die(f"等待 {label} 超时 ({url}): {last_err}")
+    die(
+        f"等待后端超时 ({HEALTH_URL}): {last_err}\n"
+        "  请确认启动的是本仓库 backend，且 /api/health 返回 {\"ok\": true}"
+    )
+
+
+def wait_frontend(timeout: float = 45.0) -> None:
+    deadline = time.time() + timeout
+    last_err = ""
+    while time.time() < deadline:
+        try:
+            req = urllib.request.Request(LOCAL_FRONTEND_URL, method="GET")
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                ctype = resp.headers.get("Content-Type", "")
+                if resp.status == 200 and "text/html" in ctype:
+                    print(f"[startup] 前端就绪: {LOCAL_FRONTEND_URL}")
+                    return
+                last_err = f"HTTP {resp.status} Content-Type={ctype}"
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = str(e)
+        time.sleep(0.4)
+    die(f"等待前端超时 ({LOCAL_FRONTEND_URL}): {last_err}")
 
 
 def run_managed(*, open_browser: bool) -> None:
@@ -133,8 +177,8 @@ def run_managed(*, open_browser: bool) -> None:
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    wait_http(HEALTH_URL, label="后端")
-    wait_http(LOCAL_FRONTEND_URL, label="前端")
+    wait_backend()
+    wait_frontend()
     print_access_urls()
     if open_browser:
         webbrowser.open(LOCAL_FRONTEND_URL)
@@ -160,6 +204,7 @@ def main() -> None:
     os.chdir(ROOT)
     ensure_venv()
     ensure_frontend_deps()
+    ensure_ports_free()
 
     print(f"[startup] 启动后端与前端（监听 {BIND_HOST}）...")
     run_managed(open_browser=not args.no_browser)

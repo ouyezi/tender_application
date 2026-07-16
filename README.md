@@ -32,11 +32,11 @@ cd frontend && npm install
 脚本会：
 
 1. 检查虚拟环境与前端依赖（缺 `node_modules` 时自动 `npm install`）
-2. 在**当前终端**启动后端（`0.0.0.0:8000`）与前端（`0.0.0.0:5173`），局域网可访问
+2. 在**当前终端**启动后端（`0.0.0.0:8888`）与前端（`0.0.0.0:5555`），局域网可访问
 3. 等待服务就绪后打印访问地址，并打开**一个**浏览器标签页
 4. `Ctrl+C` 停止前后端
 
-不自动开浏览器：`.venv/bin/python startup.py --no-browser` 或 `./start.sh --no-browser`（需把参数传给 python，见下）。
+不自动开浏览器：`.venv/bin/python startup.py --no-browser` 或 `./start.sh --no-browser`。
 
 ```bash
 ./start.sh
@@ -44,7 +44,7 @@ cd frontend && npm install
 .venv/bin/python startup.py --no-browser
 ```
 
-同网段其他机器访问：`http://<本机局域网IP>:5173`（启动日志会打印具体地址）。若连不上，检查系统防火墙是否放行 **5173** / **8000**。
+同网段其他机器访问：`http://<本机局域网IP>:5555`（启动日志会打印具体地址）。若连不上，检查系统防火墙是否放行 **5555** / **8888**。
 
 > 注意：无鉴权，仅建议在可信局域网内使用，不要直接暴露到公网。
 
@@ -53,20 +53,20 @@ cd frontend && npm install
 ### 后端
 
 ```bash
-.venv/bin/uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8000
+.venv/bin/uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8888
 ```
 
-- API 文档：`http://localhost:8000/docs` 或 `http://<局域网IP>:8000/docs`
+- API 文档：`http://localhost:8888/docs` 或 `http://<局域网IP>:8888/docs`
 - 健康检查：`GET /api/health` → `{"ok": true}`
 - 首次启动若配置表为空，会自动写入 3 条示例诊断配置（企业资质核验、目录完整性、偏差表响应）
 
 ### 前端
 
 ```bash
-cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5173
+cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5555
 ```
 
-前端默认监听 `0.0.0.0:5173`，通过 Vite 代理把 `/api` 转到本机后端。
+前端默认监听 `0.0.0.0:5555`，通过 Vite 代理把 `/api` 转到本机后端 `8888`。
 
 | 页面 | 路径 |
 |---|---|

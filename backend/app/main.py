@@ -33,6 +33,17 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root():
+    """避免访问 API 根路径时只看到裸 404；引导到前端。"""
+    return {
+        "service": "tender-diagnosis-api",
+        "message": "这是后端 API。请打开前端页面 http://<主机IP>:5555/ ，不要只访问 :8888/",
+        "health": "/api/health",
+        "docs": "/docs",
+    }
+
+
 @app.get("/api/health")
 async def health():
     return {"ok": True}
