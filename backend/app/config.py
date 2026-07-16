@@ -10,3 +10,6 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".pdf", ".docx"}
 MOCK_ITEM_DELAY_SECONDS = 0.8
+MOCK_INTERPRET_DELAY_SECONDS = 0.5
+INTERPRETATION_AGENT = "mock"  # mock | http (http not implemented this sprint)
+INTERPRETATION_AGENT_URL = ""

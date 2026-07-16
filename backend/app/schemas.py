@@ -69,6 +69,8 @@ class TaskListOut(BaseModel):
     progress_total: int
     report_md_path: Optional[str]
     report_docx_path: Optional[str]
+    interpret_md_path: Optional[str]
+    interpret_html_path: Optional[str]
     error_message: Optional[str]
     created_at: datetime
     updated_at: datetime
@@ -80,3 +82,4 @@ class TaskOut(TaskListOut):
     bid_path: str
     results: List[ResultOut] = []
     report_markdown: str = ""
+    interpret_markdown: str = ""

@@ -69,6 +69,8 @@ def _task_to_out(
         progress_total=task.progress_total,
         report_md_path=task.report_md_path,
         report_docx_path=task.report_docx_path,
+        interpret_md_path=task.interpret_md_path,
+        interpret_html_path=task.interpret_html_path,
         error_message=task.error_message,
         created_at=task.created_at,
         updated_at=task.updated_at,
