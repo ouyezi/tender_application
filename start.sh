@@ -16,4 +16,4 @@ if [[ ! -d "$ROOT/frontend/node_modules" ]]; then
   (cd frontend && npm install)
 fi
 
-exec .venv/bin/python "$ROOT/startup.py"
+exec .venv/bin/python "$ROOT/startup.py" "$@"

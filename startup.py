@@ -2,10 +2,12 @@
 """一键启动标书诊断 Demo（后端 FastAPI + 前端 Vite）。
 
 默认监听 0.0.0.0，局域网内其他机器可通过本机 IP 访问。
+前后端在当前终端内托管，不再额外弹出 Terminal 窗口。
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import signal
 import socket
@@ -86,36 +88,7 @@ def wait_http(url: str, timeout: float = 45.0, label: str = "service") -> None:
     die(f"等待 {label} 超时 ({url}): {last_err}")
 
 
-def _as_escape(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def open_macos_terminals() -> bool:
-    """在 Terminal.app 中各开一个窗口跑前后端。"""
-    if sys.platform != "darwin":
-        return False
-
-    backend_line = (
-        f"cd {_as_escape(str(ROOT))} && "
-        f"{_as_escape(str(VENV_UVICORN))} app.main:app --reload "
-        f"--app-dir backend --host {BIND_HOST} --port {BACKEND_PORT}"
-    )
-    frontend_line = (
-        f"cd {_as_escape(str(ROOT / 'frontend'))} && "
-        f"npm run dev -- --port {FRONTEND_PORT} --host {BIND_HOST}"
-    )
-    script = f'''
-tell application "Terminal"
-    activate
-    do script "{backend_line}"
-    delay 0.4
-    do script "{frontend_line}"
-end tell
-'''
-    return subprocess.run(["osascript", "-e", script]).returncode == 0
-
-
-def run_managed() -> None:
+def run_managed(*, open_browser: bool) -> None:
     """在当前进程托管两个子进程（Ctrl+C 一并停止）。"""
     env = os.environ.copy()
     backend = subprocess.Popen(
@@ -163,7 +136,8 @@ def run_managed() -> None:
     wait_http(HEALTH_URL, label="后端")
     wait_http(LOCAL_FRONTEND_URL, label="前端")
     print_access_urls()
-    webbrowser.open(LOCAL_FRONTEND_URL)
+    if open_browser:
+        webbrowser.open(LOCAL_FRONTEND_URL)
     print("[startup] 按 Ctrl+C 停止")
 
     while True:
@@ -175,21 +149,20 @@ def run_managed() -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="启动标书诊断 Demo")
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="启动后不自动打开浏览器",
+    )
+    args = parser.parse_args()
+
     os.chdir(ROOT)
     ensure_venv()
     ensure_frontend_deps()
 
     print(f"[startup] 启动后端与前端（监听 {BIND_HOST}）...")
-
-    if open_macos_terminals():
-        wait_http(HEALTH_URL, label="后端")
-        wait_http(LOCAL_FRONTEND_URL, label="前端")
-        print_access_urls()
-        print("[startup] 已在 Terminal.app 中弹出两个窗口")
-        webbrowser.open(LOCAL_FRONTEND_URL)
-        return
-
-    run_managed()
+    run_managed(open_browser=not args.no_browser)
 
 
 if __name__ == "__main__":
