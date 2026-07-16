@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import update
+from sqlalchemy import inspect, text, update
+from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import DATABASE_URL
@@ -10,9 +11,36 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
+def _migrate_sqlite_columns(sync_conn) -> None:
+    """Add missing nullable columns on existing SQLite tables.
+
+    ``create_all`` only creates missing tables; it does not ALTER existing ones.
+    Demo DBs created before workspace fields need this lightweight upgrade.
+    """
+    inspector = inspect(sync_conn)
+    dialect = sqlite.dialect()
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue
+        existing = {col["name"] for col in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing:
+                continue
+            if not column.nullable and column.server_default is None:
+                # Avoid ADD COLUMN NOT NULL without a default on populated tables.
+                continue
+            col_type = column.type.compile(dialect=dialect)
+            sync_conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {col_type}"))
+
+
+def init_db_on_connection(sync_conn) -> None:
+    Base.metadata.create_all(sync_conn)
+    _migrate_sqlite_columns(sync_conn)
+
+
 async def init_db() -> None:
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(init_db_on_connection)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
