@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app import db as database
 from app.config import REPORT_DIR
 from app.models import DiagnosisResult
+from app.services import artifact
 
 
 def build_markdown(task_id: str, results: list[dict]) -> str:
@@ -103,5 +104,6 @@ async def generate_and_save_reports(
     markdown = build_markdown(task_id, results)
     md_path.write_text(markdown, encoding="utf-8")
     write_docx(str(docx_path), markdown)
+    artifact.sync_to_artifact_report(task_id, md_path, docx_path)
 
     return str(md_path), str(docx_path)

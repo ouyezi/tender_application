@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -47,6 +48,13 @@ def dest_path_for(task_id: str, kind: str, *, file_id: str, original_name: str) 
     if ext and dest.suffix.lower() != ext:
         dest = dest.with_suffix(ext)
     return dest
+
+
+def sync_to_artifact_report(task_id: str, *paths: Path) -> None:
+    dest_dir = ensure_artifact_dirs(task_id) / "report"
+    for p in paths:
+        if p and Path(p).is_file():
+            shutil.copy2(p, dest_dir / Path(p).name)
 
 
 def write_index_md(task_id: str, files: Iterable[dict[str, Any]]) -> Path:

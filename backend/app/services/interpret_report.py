@@ -5,6 +5,7 @@ import re
 
 from app.config import REPORT_DIR
 from app.engine.base import InterpretationResult
+from app.services import artifact
 
 
 def markdown_to_html_document(title: str, markdown: str) -> str:
@@ -68,4 +69,5 @@ def save_interpret_reports(task_id: str, result: InterpretationResult) -> tuple[
         markdown_to_html_document(result.title, result.markdown),
         encoding="utf-8",
     )
+    artifact.sync_to_artifact_report(task_id, md_path, html_path)
     return str(md_path), str(html_path)

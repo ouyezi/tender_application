@@ -24,6 +24,17 @@ def test_move_into_document(tmp_path, monkeypatch):
     assert not src.exists()
 
 
+def test_sync_to_artifact_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(artifact, "UPLOAD_DIR", tmp_path)
+    task_id = "T-TEST-004"
+    src = tmp_path / "report.md"
+    src.write_text("# report", encoding="utf-8")
+    artifact.sync_to_artifact_report(task_id, src)
+    dest = tmp_path / task_id / "report" / "report.md"
+    assert dest.is_file()
+    assert dest.read_text(encoding="utf-8") == "# report"
+
+
 def test_write_index_md(tmp_path, monkeypatch):
     monkeypatch.setattr(artifact, "UPLOAD_DIR", tmp_path)
     task_id = "T-TEST-003"
