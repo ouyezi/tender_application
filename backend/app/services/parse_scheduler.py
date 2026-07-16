@@ -60,13 +60,25 @@ async def kick() -> None:
     _get_wake().set()
 
 
-def reset_for_tests() -> None:
-    """Clear in-memory scheduler state between tests."""
+async def reset_for_tests() -> None:
+    """Clear in-memory scheduler state between tests.
+
+    Awaits the cancelled worker task (instead of merely calling ``cancel()``)
+    so it fully unwinds — including any in-flight DB session — before the
+    test's event loop is torn down. Leaving a cancelled-but-not-yet-finished
+    task dangling can otherwise deadlock ``asyncio.run()``'s teardown when it
+    tries to cancel/await the same task itself.
+    """
     global _worker, _wake
-    if _worker is not None and not _worker.done():
-        _worker.cancel()
+    worker = _worker
     _worker = None
     _wake = None
+    if worker is not None and not worker.done():
+        worker.cancel()
+        try:
+            await worker
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 async def _loop() -> None:

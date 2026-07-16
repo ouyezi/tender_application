@@ -1,6 +1,7 @@
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.db import get_db
 from app.main import app
@@ -12,7 +13,11 @@ from app.services import parse_scheduler, scheduler
 async def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     url = f"sqlite+aiosqlite:///{db_path}"
-    engine = create_async_engine(url, echo=False)
+    # NullPool avoids reusing pooled aiosqlite connections across requests: a
+    # connection left checked out (e.g. by a lingering background task) at
+    # ``engine.dispose()`` time can otherwise deadlock the event loop during
+    # test teardown, since its worker thread never receives a close sentinel.
+    engine = create_async_engine(url, echo=False, poolclass=NullPool)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with engine.begin() as conn:
@@ -35,14 +40,14 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.scheduler.MOCK_INTERPRET_DELAY_SECONDS", 0.01)
     (tmp_path / "uploads").mkdir()
     (tmp_path / "reports").mkdir()
-    scheduler.reset_for_tests()
-    parse_scheduler.reset_for_tests()
+    await scheduler.reset_for_tests()
+    await parse_scheduler.reset_for_tests()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
-    scheduler.reset_for_tests()
-    parse_scheduler.reset_for_tests()
+    await scheduler.reset_for_tests()
+    await parse_scheduler.reset_for_tests()
     app.dependency_overrides.clear()
     await engine.dispose()

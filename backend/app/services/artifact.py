@@ -39,6 +39,16 @@ def move_into_document(task_id: str, src: Path, *, file_id: str, original_name: 
     return dest
 
 
+def dest_path_for(task_id: str, kind: str, *, file_id: str, original_name: str) -> Path:
+    """Compute (without creating) the on-disk path for a newly uploaded workspace file."""
+    root = ensure_artifact_dirs(task_id)
+    ext = Path(original_name).suffix.lower()
+    dest = root / kind / f"{file_id}_{_safe_name(original_name)}"
+    if ext and dest.suffix.lower() != ext:
+        dest = dest.with_suffix(ext)
+    return dest
+
+
 def write_index_md(task_id: str, files: Iterable[dict[str, Any]]) -> Path:
     root = ensure_artifact_dirs(task_id)
     lines = [

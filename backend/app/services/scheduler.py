@@ -43,14 +43,28 @@ def _get_control(task_id: str) -> _TaskControl:
     return _controls[task_id]
 
 
-def reset_for_tests() -> None:
-    """Clear in-memory scheduler state between tests."""
+async def reset_for_tests() -> None:
+    """Clear in-memory scheduler state between tests.
+
+    Awaits each cancelled background task (instead of merely calling
+    ``cancel()``) so it fully unwinds — including any in-flight DB session —
+    before the test's event loop is torn down. Leaving a cancelled-but-not-
+    yet-finished task dangling can otherwise deadlock ``asyncio.run()``'s
+    teardown when it tries to cancel/await the same task itself.
+    """
+    tasks = []
     for ctrl in list(_controls.values()):
         if ctrl.bg_task is not None and not ctrl.bg_task.done():
             ctrl.stop_requested = True
             ctrl.pause_event.set()
             ctrl.bg_task.cancel()
+            tasks.append(ctrl.bg_task)
     _controls.clear()
+    for task in tasks:
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 async def wait_for_terminal(task_id: str, timeout: float = 10.0) -> str:

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.configs import router as configs_router
 from app.api.tasks import router as tasks_router
+from app.api.workspaces import router as workspaces_router
 from app.config import REPORT_DIR, UPLOAD_DIR
 from app.db import init_db, recover_interrupted_parse_jobs, recover_interrupted_tasks
 from app.seed import seed_configs_if_empty
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Tender Diagnosis Demo", lifespan=lifespan)
 app.include_router(configs_router)
 app.include_router(tasks_router)
+app.include_router(workspaces_router)
 # Demo 无鉴权：允许局域网其他机器通过本机 IP 访问前端时的跨域请求
 app.add_middleware(
     CORSMiddleware,

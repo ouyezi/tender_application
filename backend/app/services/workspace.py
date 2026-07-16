@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
+from typing import Any, Optional
 
+from fastapi import HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import UPLOAD_DIR  # re-export for tests monkeypatch if needed
+from app.config import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, UPLOAD_DIR  # re-export for tests monkeypatch if needed
 from app.models import DiagnosisTask, ParseJob, WorkspaceFile, utcnow
 from app.services import artifact
+
+_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+
+
+class ReparseConflict(Exception):
+    """Raised when a reparse is requested while a job is already pending/running."""
 
 
 def new_file_id() -> str:
@@ -76,8 +86,6 @@ async def register_task_documents(
 
 
 async def artifact_refresh_index(session: AsyncSession, task_id: str) -> None:
-    from sqlalchemy import select
-
     rows = (
         await session.execute(select(WorkspaceFile).where(WorkspaceFile.task_id == task_id))
     ).scalars().all()
@@ -97,3 +105,191 @@ async def artifact_refresh_index(session: AsyncSession, task_id: str) -> None:
             for r in rows
         ],
     )
+
+
+async def _stream_save_upload(upload_file: UploadFile, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    with dest.open("wb") as out:
+        while True:
+            chunk = await upload_file.read(_UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(400, "file too large")
+            out.write(chunk)
+
+
+async def import_file(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    upload_file: UploadFile,
+    label: str = "",
+) -> WorkspaceFile:
+    """Save an uploaded workspace file, classify it, and (for pdf/docx) enqueue a parse job.
+
+    Raises ``LookupError`` if the task doesn't exist. Caller is responsible
+    for committing the session and calling ``parse_scheduler.kick()`` when
+    the returned file's ``kind`` is ``"document"``.
+    """
+    task = await session.get(DiagnosisTask, task_id)
+    if task is None:
+        raise LookupError("task_not_found")
+    if not upload_file.filename:
+        raise HTTPException(400, "file required")
+
+    ext = Path(upload_file.filename).suffix.lower()
+    kind = "document" if ext in ALLOWED_EXTENSIONS else "other"
+    fid = new_file_id()
+    dest = artifact.dest_path_for(task_id, kind, file_id=fid, original_name=upload_file.filename)
+    await _stream_save_upload(upload_file, dest)
+
+    wf = WorkspaceFile(
+        id=fid,
+        task_id=task_id,
+        label=label,
+        original_filename=upload_file.filename,
+        stored_path=str(dest),
+        kind=kind,
+        ext=ext,
+        parse_status="pending" if kind == "document" else "skipped",
+    )
+    session.add(wf)
+    await session.flush()
+    if kind == "document":
+        await enqueue_parse(session, wf)
+    await artifact_refresh_index(session, task_id)
+    return wf
+
+
+async def reparse(session: AsyncSession, wf: WorkspaceFile) -> ParseJob:
+    """Queue a new parse attempt for ``wf``.
+
+    Raises ``ReparseConflict`` if a job is already pending/running, and
+    ``ValueError`` if the file isn't a parseable document.
+    """
+    if wf.kind != "document":
+        raise ValueError("not_a_document")
+    if wf.parse_status in ("pending", "running"):
+        raise ReparseConflict("parse already in progress")
+
+    last_job = (
+        await session.execute(
+            select(ParseJob)
+            .where(ParseJob.file_id == wf.id)
+            .order_by(ParseJob.attempt.desc(), ParseJob.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    attempt = (last_job.attempt + 1) if last_job else 1
+    job = await enqueue_parse(session, wf, attempt=attempt)
+    wf.parse_error = None
+    await artifact_refresh_index(session, wf.task_id)
+    return job
+
+
+def _normalize_tree_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized = []
+    for node in nodes:
+        copy = dict(node)
+        copy["numbering"] = node.get("numbering") or ""
+        copy["children"] = _normalize_tree_nodes(node.get("children") or [])
+        normalized.append(copy)
+    return normalized
+
+
+def get_tree(wf: WorkspaceFile) -> list[dict[str, Any]]:
+    """Load and return the nested section tree for a parsed file."""
+    if not wf.tree_path or not Path(wf.tree_path).is_file():
+        raise FileNotFoundError("tree_not_found")
+    data = json.loads(Path(wf.tree_path).read_text(encoding="utf-8"))
+    return _normalize_tree_nodes(data.get("nodes", []))
+
+
+def _find_node(nodes: list[dict[str, Any]], node_id: str) -> Optional[dict[str, Any]]:
+    for node in nodes:
+        if node.get("id") == node_id:
+            return node
+        found = _find_node(node.get("children") or [], node_id)
+        if found is not None:
+            return found
+    return None
+
+
+def get_content(wf: WorkspaceFile, node_id: str) -> dict[str, Any]:
+    """Return the markdown slice (by ``start_offset:end_offset``) for one section.
+
+    Raises ``FileNotFoundError`` if the file hasn't been parsed yet, and
+    ``LookupError`` if ``node_id`` doesn't exist in the tree.
+    """
+    if not wf.tree_path or not Path(wf.tree_path).is_file():
+        raise FileNotFoundError("tree_not_found")
+    if not wf.md_path or not Path(wf.md_path).is_file():
+        raise FileNotFoundError("markdown_not_found")
+
+    data = json.loads(Path(wf.tree_path).read_text(encoding="utf-8"))
+    node = _find_node(data.get("nodes", []), node_id)
+    if node is None:
+        raise LookupError("node_not_found")
+
+    markdown = Path(wf.md_path).read_text(encoding="utf-8")
+    section = markdown[node["start_offset"] : node["end_offset"]]
+    return {"node_id": node_id, "title": node.get("title", ""), "markdown": section}
+
+
+def _aggregate_counts(files: list[WorkspaceFile]) -> dict[str, int]:
+    succeeded = sum(1 for f in files if f.parse_status in ("succeeded", "partial"))
+    running = sum(1 for f in files if f.parse_status in ("pending", "running"))
+    failed = sum(1 for f in files if f.parse_status == "failed")
+    return {
+        "file_count": len(files),
+        "parse_succeeded": succeeded,
+        "parse_running": running,
+        "parse_failed": failed,
+    }
+
+
+async def list_workspaces(session: AsyncSession) -> list[dict[str, Any]]:
+    tasks = (
+        await session.execute(select(DiagnosisTask).order_by(DiagnosisTask.created_at.desc()))
+    ).scalars().all()
+    all_files = (await session.execute(select(WorkspaceFile))).scalars().all()
+    files_by_task: dict[str, list[WorkspaceFile]] = {}
+    for f in all_files:
+        files_by_task.setdefault(f.task_id, []).append(f)
+
+    items = []
+    for task in tasks:
+        files = files_by_task.get(task.id, [])
+        item = {
+            "task_id": task.id,
+            "tender_filename": task.tender_filename,
+            "bid_filename": task.bid_filename,
+            "created_at": task.created_at,
+        }
+        item.update(_aggregate_counts(files))
+        items.append(item)
+    return items
+
+
+async def get_workspace_detail(session: AsyncSession, task_id: str) -> Optional[dict[str, Any]]:
+    task = await session.get(DiagnosisTask, task_id)
+    if task is None:
+        return None
+    files = (
+        await session.execute(
+            select(WorkspaceFile)
+            .where(WorkspaceFile.task_id == task_id)
+            .order_by(WorkspaceFile.created_at.asc())
+        )
+    ).scalars().all()
+    return {
+        "task_id": task.id,
+        "tender_filename": task.tender_filename,
+        "bid_filename": task.bid_filename,
+        "files": files,
+    }
