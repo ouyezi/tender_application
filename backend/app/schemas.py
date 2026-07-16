@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,3 +39,44 @@ class ConfigOut(BaseModel):
     importance: str
     created_at: datetime
     updated_at: datetime
+
+
+class ResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: str
+    config_id: Optional[int]
+    content_title: str
+    description: str
+    result: str
+    evidence: str
+    suggestion: str
+    sort_order: int
+    created_at: datetime
+
+
+class TaskListOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    tender_filename: str
+    bid_filename: str
+    background: str
+    requirements: str
+    status: str
+    progress_done: int
+    progress_total: int
+    report_md_path: Optional[str]
+    report_docx_path: Optional[str]
+    error_message: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    finished_at: Optional[datetime]
+
+
+class TaskOut(TaskListOut):
+    tender_path: str
+    bid_path: str
+    results: List[ResultOut] = []
+    report_markdown: str = ""

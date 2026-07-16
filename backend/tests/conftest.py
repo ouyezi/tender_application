@@ -8,7 +8,7 @@ from app.models import Base
 
 
 @pytest_asyncio.fixture
-async def client(tmp_path):
+async def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     url = f"sqlite+aiosqlite:///{db_path}"
     engine = create_async_engine(url, echo=False)
@@ -22,6 +22,8 @@ async def client(tmp_path):
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr("app.services.files.UPLOAD_DIR", tmp_path / "uploads")
+    (tmp_path / "uploads").mkdir()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
