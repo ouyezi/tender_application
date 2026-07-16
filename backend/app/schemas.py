@@ -83,3 +83,59 @@ class TaskOut(TaskListOut):
     results: List[ResultOut] = []
     report_markdown: str = ""
     interpret_markdown: str = ""
+
+
+class WorkspaceFileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    task_id: str
+    label: str
+    original_filename: str
+    kind: str
+    ext: str
+    parse_status: str
+    parse_error: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkspaceListItem(BaseModel):
+    task_id: str
+    tender_filename: str
+    bid_filename: str
+    file_count: int
+    parse_succeeded: int
+    parse_running: int
+    parse_failed: int
+    created_at: datetime
+
+
+class WorkspaceDetailOut(BaseModel):
+    task_id: str
+    tender_filename: str
+    bid_filename: str
+    files: List[WorkspaceFileOut]
+
+
+class TreeNodeOut(BaseModel):
+    id: str
+    title: str
+    level: int
+    numbering: str = ""
+    parent_id: Optional[str] = None
+    start_offset: int
+    end_offset: int
+    self_start: int
+    subtree_end: int
+    source: str = "heading"
+    children: List["TreeNodeOut"] = Field(default_factory=list)
+
+
+TreeNodeOut.model_rebuild()
+
+
+class ContentOut(BaseModel):
+    node_id: str
+    title: str
+    markdown: str

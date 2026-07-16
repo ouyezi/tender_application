@@ -37,6 +37,8 @@ class DiagnosisTask(Base):
     tender_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     bid_filename: Mapped[str] = mapped_column(String(512), nullable=False)
     bid_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    tender_file_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    bid_file_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     background: Mapped[str] = mapped_column(Text, default="")
     requirements: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="interpreting")
@@ -70,3 +72,41 @@ class DiagnosisResult(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     task: Mapped["DiagnosisTask"] = relationship(back_populates="results")
+
+
+class WorkspaceFile(Base):
+    __tablename__ = "workspace_files"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(32), ForeignKey("diagnosis_tasks.id"), index=True)
+    label: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    stored_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="document")  # document | other
+    ext: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    parse_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    # pending | running | succeeded | failed | partial | skipped
+    parse_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tree_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    md_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    chunks_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ParseJob(Base):
+    __tablename__ = "parse_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(String(32), ForeignKey("workspace_files.id"), index=True)
+    task_id: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    # queued | running | succeeded | failed
+    stage: Mapped[str] = mapped_column(String(32), nullable=False, default="convert")
+    # convert | extract | build_tree | chunk | write_index
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    warnings: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
