@@ -22,6 +22,9 @@ export default function AdminLayout() {
           >
             诊断任务
           </NavLink>
+          <NavLink to="/workspaces" className="admin-nav-link">
+            工作区
+          </NavLink>
           <NavLink to="/" className="admin-nav-link admin-nav-back">
             返回诊断页
           </NavLink>

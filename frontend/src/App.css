@@ -560,6 +560,56 @@ a:hover {
   color: var(--text-muted);
 }
 
+/* —— Workspace list —— */
+.workspace-list-row {
+  cursor: pointer;
+}
+
+.workspace-list-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.workspace-task-id {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+.workspace-file-count {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+.workspace-parse-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+}
+
+.parse-stat {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.parse-stat-succeeded {
+  background: #ecfdf3;
+  color: var(--success);
+}
+
+.parse-stat-running {
+  background: #eff8ff;
+  color: var(--info);
+}
+
+.parse-stat-failed {
+  background: #fef3f2;
+  color: var(--danger);
+}
+
 .progress-cell {
   display: flex;
   align-items: center;

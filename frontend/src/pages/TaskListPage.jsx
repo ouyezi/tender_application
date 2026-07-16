@@ -43,6 +43,9 @@ export default function TaskListPage() {
       <header className="page-header">
         <div className="page-header-titles">
           <h1>标书诊断</h1>
+          <Link className="header-link" to="/workspaces">
+            工作区
+          </Link>
           <Link className="header-link" to="/admin">
             管理后台
           </Link>

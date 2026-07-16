@@ -67,3 +67,33 @@ export function interpretHtmlUrl(id) {
 export function fileUrl(id, kind) {
   return `/api/tasks/${id}/files/${kind}`
 }
+
+export function listWorkspaces() {
+  return request('/api/workspaces')
+}
+
+export function getWorkspace(taskId) {
+  return request(`/api/workspaces/${taskId}`)
+}
+
+export function importWorkspaceFile(taskId, formData) {
+  return request(`/api/workspaces/${taskId}/files`, { method: 'POST', body: formData })
+}
+
+export function getWorkspaceTree(taskId, fileId) {
+  return request(`/api/workspaces/${taskId}/files/${fileId}/tree`)
+}
+
+export function getWorkspaceContent(taskId, fileId, nodeId) {
+  return request(
+    `/api/workspaces/${taskId}/files/${fileId}/content?node_id=${encodeURIComponent(nodeId)}`,
+  )
+}
+
+export function reparseWorkspaceFile(taskId, fileId) {
+  return request(`/api/workspaces/${taskId}/files/${fileId}/reparse`, { method: 'POST' })
+}
+
+export function workspaceFileDownloadUrl(taskId, fileId) {
+  return `/api/workspaces/${taskId}/files/${fileId}/download`
+}
