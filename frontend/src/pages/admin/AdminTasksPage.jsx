@@ -81,6 +81,9 @@ export default function AdminTasksPage() {
       ) : tasks.length === 0 ? (
         <div className="empty-state">
           <p>暂无诊断任务</p>
+          <p className="empty-state-hint">
+            请到 <Link to="/">任务列表</Link> 创建诊断任务
+          </p>
         </div>
       ) : (
         <div className="admin-table-wrap">
