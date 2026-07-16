@@ -10,7 +10,7 @@ Importance = Literal["high", "medium", "low"]
 
 
 class ConfigCreate(BaseModel):
-    title: str = Field(..., max_length=200)
+    title: str = Field(..., min_length=1, max_length=200)
     technique: str = ""
     content_mode: ContentMode
     content_scope: Optional[str] = Field(None, max_length=64)
@@ -19,7 +19,7 @@ class ConfigCreate(BaseModel):
 
 
 class ConfigUpdate(BaseModel):
-    title: str = Field(..., max_length=200)
+    title: str = Field(..., min_length=1, max_length=200)
     technique: str = ""
     content_mode: ContentMode
     content_scope: Optional[str] = Field(None, max_length=64)
