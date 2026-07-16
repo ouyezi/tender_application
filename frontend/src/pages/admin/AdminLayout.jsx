@@ -3,15 +3,33 @@ import { NavLink, Outlet } from 'react-router-dom'
 export default function AdminLayout() {
   return (
     <div className="admin-layout">
-      <header className="admin-header">
-        <h1>AdminLayout</h1>
-        <nav className="admin-nav">
-          <NavLink to="/admin/configs">Configs</NavLink>
-          <NavLink to="/admin/tasks">Tasks</NavLink>
-          <NavLink to="/">Back</NavLink>
+      <aside className="admin-sidebar">
+        <div className="admin-sidebar-brand">管理后台</div>
+        <nav className="admin-sidebar-nav">
+          <NavLink
+            to="/admin/configs"
+            className={({ isActive }) =>
+              `admin-nav-link${isActive ? ' active' : ''}`
+            }
+          >
+            诊断项目配置
+          </NavLink>
+          <NavLink
+            to="/admin/tasks"
+            className={({ isActive }) =>
+              `admin-nav-link${isActive ? ' active' : ''}`
+            }
+          >
+            诊断任务
+          </NavLink>
+          <NavLink to="/" className="admin-nav-link admin-nav-back">
+            返回诊断页
+          </NavLink>
         </nav>
-      </header>
-      <Outlet />
+      </aside>
+      <div className="admin-main">
+        <Outlet />
+      </div>
     </div>
   )
 }
