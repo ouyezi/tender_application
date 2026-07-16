@@ -1,6 +1,6 @@
 # 标书诊断 Demo
 
-本地可运行的标书诊断演示系统：上传招标文件与标书后发起诊断任务，管理端配置诊断项并监控任务进度。诊断引擎默认为 Mock 实现，不调用真实 LLM，也不包含登录鉴权。
+本地可运行的标书诊断演示系统：上传招标文件与标书后发起诊断任务，管理端配置诊断项并监控任务进度；另含**工作区管理**，按任务 Artifact 导入文件、异步解析并浏览文档树与章节内容。诊断引擎默认为 Mock 实现，不调用真实 LLM，也不包含登录鉴权。
 
 ## 环境准备
 
@@ -14,6 +14,8 @@
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
 ```
+
+主要 Python 依赖：`fastapi`、`python-docx`（DOCX 解析）、`pymupdf`（PDF 转 Markdown）。
 
 ### 前端依赖
 
@@ -74,6 +76,8 @@ cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5555
 |---|---|
 | 任务列表 / 创建诊断 | `/` |
 | 任务详情（报告预览） | `/tasks/:id` |
+| 工作区列表 | `/workspaces` |
+| 工作区详情（文件 / 文档树 / 章节） | `/workspaces/:taskId` |
 | 管理端 · 诊断配置 | `/admin/configs` |
 | 管理端 · 任务监控 | `/admin/tasks` |
 
@@ -86,6 +90,12 @@ cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5555
 3. **暂停 / 继续**：任务 `running` 时在管理端暂停，进度停止；继续后直至完成。
 4. **停止后不可下载**：`stop` 后状态为 `stopped`，不可 resume；正式报告下载返回 404。
 5. **非法扩展名**：上传非 PDF/DOCX（如 `.txt`）被拒绝。
+
+### 工作区管理
+
+6. **导入与解析**：在 `/workspaces/:taskId` 上传 PDF/DOCX（可填自由标签）；解析完成后文件状态为 `succeeded` 或 `partial`，`index.md` 与 Artifact 目录（`markdown/`、`json/` 等）有对应产物。创建诊断任务时，招标/标书会自动入库并各启动一条解析任务。
+7. **文档树浏览**：解析完成后选中文件，左侧显示章节树、右侧显示章节 Markdown；切换节点时内容随之变化。
+8. **重试解析**：`failed` 或 `partial` 文件可点击重试（`POST .../reparse`），状态回到 `queued` 并重新跑解析管线。
 
 ## 说明
 
