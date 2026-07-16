@@ -13,6 +13,7 @@ from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
 from app.schemas import TaskListOut, TaskOut
 from app.services import files, scheduler
+from app.services.scheduler import SchedulerConflict
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -126,3 +127,48 @@ async def get_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut:
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return _task_to_out(task)
+
+
+async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
+    result = await db.execute(
+        select(DiagnosisTask)
+        .where(DiagnosisTask.id == task_id)
+        .options(selectinload(DiagnosisTask.results))
+    )
+    task = result.scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    return _task_to_out(task)
+
+
+@router.post("/{task_id}/pause", response_model=TaskOut)
+async def pause_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut:
+    try:
+        await scheduler.pause_task(task_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    except SchedulerConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return await _load_task_out(db, task_id)
+
+
+@router.post("/{task_id}/resume", response_model=TaskOut)
+async def resume_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut:
+    try:
+        await scheduler.resume_task(task_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    except SchedulerConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return await _load_task_out(db, task_id)
+
+
+@router.post("/{task_id}/stop", response_model=TaskOut)
+async def stop_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut:
+    try:
+        await scheduler.stop_task(task_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    except SchedulerConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return await _load_task_out(db, task_id)

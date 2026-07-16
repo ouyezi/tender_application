@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import Any
 
 from app.engine.base import DiagnosisItemResult
@@ -24,7 +25,8 @@ class MockEngine:
         technique = config_item.get("technique", "")
         content_text = config_item.get("content_text", "")
 
-        result = RESULTS[hash(title) % len(RESULTS)]
+        digest = int(hashlib.md5(title.encode("utf-8")).hexdigest(), 16)
+        result = RESULTS[digest % len(RESULTS)]
 
         if technique and content_text:
             description = f"{technique}：{content_text}"
