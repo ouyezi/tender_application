@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -210,6 +211,21 @@ def get_tree(wf: WorkspaceFile) -> list[dict[str, Any]]:
     return _normalize_tree_nodes(data.get("nodes", []))
 
 
+_RELATIVE_ARTIFACT_LINK_RE = re.compile(
+    r"(\]\()\.\./(image|table)/([^/]+)/([^)\s]+)(\))"
+)
+
+
+def _rewrite_artifact_links(markdown: str, task_id: str) -> str:
+    """Rewrite ``../image|table/{file_id}/...`` links for browser HTTP access."""
+
+    def repl(m: re.Match[str]) -> str:
+        prefix, kind, file_id, name, suffix = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+        return f"{prefix}/artifact-files/{task_id}/{kind}/{file_id}/{name}{suffix}"
+
+    return _RELATIVE_ARTIFACT_LINK_RE.sub(repl, markdown)
+
+
 def _find_node(nodes: list[dict[str, Any]], node_id: str) -> Optional[dict[str, Any]]:
     for node in nodes:
         if node.get("id") == node_id:
@@ -238,6 +254,7 @@ def get_content(wf: WorkspaceFile, node_id: str) -> dict[str, Any]:
 
     markdown = Path(wf.md_path).read_text(encoding="utf-8")
     section = markdown[node["start_offset"] : node["end_offset"]]
+    section = _rewrite_artifact_links(section, wf.task_id)
     return {"node_id": node_id, "title": node.get("title", ""), "markdown": section}
 
 

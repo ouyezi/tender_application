@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.configs import router as configs_router
 from app.api.tasks import router as tasks_router
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Tender Diagnosis Demo", lifespan=lifespan)
+app.mount("/artifact-files", StaticFiles(directory=str(UPLOAD_DIR)), name="artifact-files")
 app.include_router(configs_router)
 app.include_router(tasks_router)
 app.include_router(workspaces_router)

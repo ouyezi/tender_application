@@ -241,6 +241,54 @@ async def test_reparse_failed_file(client, monkeypatch):
     assert r2.status_code == 409
 
 
+def _root_only_tree(markdown: str) -> dict:
+    return {
+        "nodes": [
+            {
+                "id": "n_root",
+                "title": "总则",
+                "level": 1,
+                "numbering": None,
+                "parent_id": None,
+                "start_offset": 0,
+                "end_offset": len(markdown),
+                "self_start": 0,
+                "subtree_end": len(markdown),
+                "source": "heading",
+                "children": [],
+            }
+        ],
+        "warnings": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_artifact_files_served_over_http(client, monkeypatch):
+    task_id = await _create_task(client, monkeypatch)
+    detail = (await client.get(f"/api/workspaces/{task_id}")).json()
+    file_id = detail["files"][0]["id"]
+
+    image_name = "img_001.png"
+    markdown = f"# 总则\n\n![示意图](../image/{file_id}/{image_name})\n"
+    tree = _root_only_tree(markdown)
+    await _write_fake_parse(task_id, file_id, markdown, tree)
+
+    image_path = artifact.artifact_root(task_id) / "image" / file_id / image_name
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    r = await client.get(
+        f"/api/workspaces/{task_id}/files/{file_id}/content",
+        params={"node_id": "n_root"},
+    )
+    assert r.status_code == 200
+    assert f"/artifact-files/{task_id}/image/{file_id}/{image_name}" in r.json()["markdown"]
+
+    r2 = await client.get(f"/artifact-files/{task_id}/image/{file_id}/{image_name}")
+    assert r2.status_code == 200
+    assert r2.content.startswith(b"\x89PNG")
+
+
 @pytest.mark.asyncio
 async def test_download_and_index(client, monkeypatch):
     task_id = await _create_task(client, monkeypatch)
