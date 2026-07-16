@@ -1,7 +1,7 @@
 # 工作区管理（Artifact 文件与文档解析）设计规格
 
 **日期：** 2026-07-16  
-**状态：** 待用户确认  
+**状态：** 已批准  
 **范围：** 新增工作区管理页；按 Artifact（= 任务 ID）组织上传文件与解析产物；异步文档处理（markdown / 图片 / 表格 / 文档树 / 分块）；章节树浏览。本期不做检索。  
 **前置：** [2026-07-16-tender-diagnosis-demo-design.md](./2026-07-16-tender-diagnosis-demo-design.md)  
 **相关：** [2026-07-16-tender-interpretation-report-design.md](./2026-07-16-tender-interpretation-report-design.md)
