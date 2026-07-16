@@ -240,6 +240,9 @@ async def _run(task_id: str) -> None:
                 tender_path=tender_path,
                 background=background,
             )
+            if _should_stop(task_id):
+                await _mark_stopped(task_id)
+                return
             md_path, html_path = interpret_report.save_interpret_reports(
                 task_id, interpret_result
             )

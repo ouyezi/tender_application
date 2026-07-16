@@ -61,6 +61,8 @@ async def test_scheduler_runs_to_completion(client):
     assert detail["progress_done"] == 3
     assert detail["progress_total"] == 3
     assert len(detail["results"]) == 3
+    assert detail["interpret_md_path"]
+    assert detail["interpret_html_path"]
 
 
 @pytest.mark.asyncio
@@ -211,6 +213,7 @@ async def test_interpret_failure_marks_failed_without_diagnosis(client, monkeypa
     assert status == "failed"
     detail = (await client.get(f"/api/tasks/{task_id}")).json()
     assert detail["results"] == []
+    assert "interpret boom" in (detail.get("error_message") or "")
     assert detail.get("interpret_markdown", "") == ""
     r = await client.get(f"/api/tasks/{task_id}/report.docx")
     assert r.status_code == 404
@@ -248,3 +251,39 @@ async def test_cannot_pause_while_interpreting(client, monkeypatch):
 
     gate.set()
     await scheduler.wait_for_terminal(task_id, timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_stop_during_interpreting(client, monkeypatch):
+    gate = asyncio.Event()
+
+    async def slow_interpret(*_args, **kwargs):
+        await gate.wait()
+        from app.engine.base import InterpretationResult
+
+        return InterpretationResult(markdown="# x\n")
+
+    monkeypatch.setattr(
+        "app.services.scheduler.MockInterpretationAgent.interpret",
+        slow_interpret,
+    )
+    await _seed_configs(client, 1)
+    body = await _create_task(client)
+    task_id = body["id"]
+
+    saw_interpreting = False
+    for _ in range(100):
+        data = (await client.get(f"/api/tasks/{task_id}")).json()
+        if data["status"] == "interpreting":
+            saw_interpreting = True
+            break
+        await asyncio.sleep(0.02)
+    assert saw_interpreting, "never saw interpreting status"
+
+    r = await client.post(f"/api/tasks/{task_id}/stop")
+    assert r.status_code == 200
+    assert r.json()["status"] == "stopped"
+
+    gate.set()
+    status = await scheduler.wait_for_terminal(task_id, timeout=5)
+    assert status == "stopped"
