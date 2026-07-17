@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -91,6 +91,42 @@ class RetrievedChunk:
     chunk_id: str
     text: str
     location: str = ""
+
+
+@dataclass
+class RetrievalHit:
+    chunk_id: str
+    file_id: str
+    node_id: str
+    segment_level: str
+    title: str
+    summary: str
+    title_path: list[str]
+    tags: list[dict]
+    text: str = ""
+    child_chunk_ids: list[str] = field(default_factory=list)
+    score: float = 0.0
+
+
+@dataclass
+class RetrievalResult:
+    mode: str
+    items: list[RetrievalHit]
+    index_status: str  # ready|partial|unavailable
+    incomplete: bool = False
+    degraded: bool = False
+    error: str | None = None
+
+
+class TypedRetrievalProvider(Protocol):
+    async def retrieve(
+        self,
+        *,
+        task_id: str,
+        content_source: str,
+        content_target: dict[str, Any],
+        item_hints: dict[str, Any] | None = None,
+    ) -> RetrievalResult: ...
 
 
 class RetrievalProvider(Protocol):
