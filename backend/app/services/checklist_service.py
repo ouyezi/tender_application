@@ -20,7 +20,7 @@ from app.models import (
     DiagnosisTask,
     utcnow,
 )
-from app.services.artifact import write_checklist_json
+from app.services.artifact import serialize_checklist_json, write_checklist_json
 from app.services.checklist_context import (
     PromptContext,
     build_prompt_context,
@@ -260,7 +260,7 @@ def validate_draft(
     if not isinstance(draft.raw_response, dict):
         raise ChecklistValidationError("raw_response must be a dict")
     try:
-        json.dumps(draft.raw_response, ensure_ascii=False)
+        serialize_checklist_json(draft.raw_response)
     except Exception as exc:
         raise ChecklistValidationError(
             "raw_response must be JSON serializable"
@@ -285,7 +285,7 @@ def _safe_repr(value: Any, limit: int = 10_000) -> str:
 def _raw_artifact_payload(draft: ChecklistDraft) -> dict[str, Any]:
     try:
         payload = asdict(draft)
-        json.dumps(payload, ensure_ascii=False)
+        serialize_checklist_json(payload)
     except Exception as exc:
         return {
             "serialization_error": f"{type(exc).__name__}: {exc}",

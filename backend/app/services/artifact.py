@@ -30,12 +30,23 @@ def _safe_name(name: str) -> str:
     return re.sub(r"[^\w.\u4e00-\u9fff\-]+", "_", base)[:180] or "file"
 
 
+def serialize_checklist_json(payload: dict[str, Any]) -> str:
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
 def write_checklist_json(
     task_id: str,
     filename: str,
     payload: dict[str, Any],
 ) -> Path:
     destination = ensure_artifact_dirs(task_id) / "json" / _safe_name(filename)
+    serialized = serialize_checklist_json(payload)
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -47,13 +58,7 @@ def write_checklist_json(
             delete=False,
         ) as temporary:
             temporary_path = Path(temporary.name)
-            json.dump(
-                payload,
-                temporary,
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
+            temporary.write(serialized)
             temporary.write("\n")
             temporary.flush()
             os.fsync(temporary.fileno())

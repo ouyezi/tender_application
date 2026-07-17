@@ -264,6 +264,93 @@ async def test_unserializable_raw_response_saves_fallback_then_fails_validation(
     assert items == []
 
 
+@pytest.mark.asyncio
+async def test_mixed_raw_response_keys_save_fallback_then_fail_validation(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import (
+        ChecklistService,
+        ChecklistValidationError,
+    )
+
+    tender_markdown = await create_task_source(tmp_path)
+    draft = replace(
+        valid_draft(tender_markdown),
+        raw_response={"a": 1, 2: "b"},
+    )
+
+    with pytest.raises(
+        ChecklistValidationError,
+        match="raw_response must be JSON serializable",
+    ):
+        await ChecklistService(StaticAgent(draft)).generate_for_task(
+            "task-checklist"
+        )
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+        categories = (await session.scalars(select(ChecklistCategory))).all()
+        items = (await session.scalars(select(ChecklistItem))).all()
+
+    raw_path = Path(generation.raw_response_path)
+    fallback = json.loads(raw_path.read_text(encoding="utf-8"))
+    assert "serialization_error" in fallback
+    assert "'a': 1" in fallback["safe_repr"]
+    assert "2: 'b'" in fallback["safe_repr"]
+    assert generation.status == "failed"
+    assert task.status == "failed"
+    assert task.current_checklist_generation_id is None
+    assert categories == []
+    assert items == []
+
+
+def invalid_json_value(case_name: str):
+    if case_name == "nan":
+        return {"value": float("nan")}
+    circular: dict[str, Any] = {}
+    circular["self"] = circular
+    return circular
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_name", ["nan", "circular"])
+async def test_invalid_json_values_use_fallback_and_validation_error(
+    client, tmp_path, case_name
+):
+    del client
+    from app.services.checklist_service import (
+        ChecklistService,
+        ChecklistValidationError,
+    )
+
+    tender_markdown = await create_task_source(tmp_path)
+    draft = replace(
+        valid_draft(tender_markdown),
+        raw_response=invalid_json_value(case_name),
+    )
+
+    with pytest.raises(
+        ChecklistValidationError,
+        match="raw_response must be JSON serializable",
+    ):
+        await ChecklistService(StaticAgent(draft)).generate_for_task(
+            "task-checklist"
+        )
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+
+    fallback = json.loads(
+        Path(generation.raw_response_path).read_text(encoding="utf-8")
+    )
+    assert fallback["serialization_error"]
+    assert generation.status == "failed"
+    assert task.current_checklist_generation_id is None
+
+
 def invalid_draft_cases(tender_markdown: str):
     draft = valid_draft(tender_markdown)
     item = draft.items[0]
