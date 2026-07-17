@@ -1,8 +1,12 @@
 import json
+import threading
+from bisect import bisect_right as standard_bisect_right
+from pathlib import Path
 
 import pytest
 
 from app.models import DiagnosisTask, WorkspaceFile
+from app.services import checklist_context
 from app.services.checklist_context import (
     ChecklistInputError,
     build_prompt_context,
@@ -20,6 +24,8 @@ from app.services.checklist_context import (
         ("abcde", 2),
         ("中文", 2),
         ("中文abcdx", 4),
+        ("，Ａ🙂", 3),
+        ("a，bＡ🙂", 4),
     ],
 )
 def test_estimate_tokens_counts_cjk_and_ascii_predictably(text, expected):
@@ -57,14 +63,40 @@ def test_long_document_builds_cache_friendly_calls_in_stable_order():
 
 def test_multiple_atx_sections_split_at_heading_boundaries_first():
     first = "# A\n" + "a" * 12 + "\n"
-    second = "# B\n" + "b" * 12 + "\n"
-    third = "# C\n" + "c" * 12 + "\n"
+    second = " ## B\n" + "b" * 12 + "\n"
+    third = "   # C\n" + "c" * 12 + "\n"
     markdown = first + second + third
 
     segments = split_tender_markdown(markdown, 1, 10, 0)
 
     assert segments == [first + second, third]
     assert all(estimate_tokens(segment) <= 10 for segment in segments)
+
+
+def test_many_headings_use_bisect_instead_of_rescanning(monkeypatch):
+    sections = [f"## Section {index}\n正文{index}\n" for index in range(2_000)]
+    markdown = "".join(sections)
+    bisect_calls = 0
+
+    def tracking_bisect_right(offsets, value, low=0, high=None):
+        nonlocal bisect_calls
+        bisect_calls += 1
+        if high is None:
+            return standard_bisect_right(offsets, value, low)
+        return standard_bisect_right(offsets, value, low, high)
+
+    monkeypatch.setattr(
+        checklist_context,
+        "bisect_right",
+        tracking_bisect_right,
+        raising=False,
+    )
+
+    segments = split_tender_markdown(markdown, 1, 40, 0)
+
+    assert "".join(segments) == markdown
+    assert all(estimate_tokens(segment) <= 40 for segment in segments)
+    assert bisect_calls == len(segments)
 
 
 def test_single_oversized_section_is_split_with_overlap_without_losing_content():
@@ -104,6 +136,7 @@ async def _create_task_source(
     config_snapshot=None,
     tender_exists=True,
     interpret_exists=True,
+    workspace_task_id=None,
 ):
     from app import db
 
@@ -131,7 +164,7 @@ async def _create_task_source(
     )
     workspace_file = WorkspaceFile(
         id=file_id,
-        task_id=task_id,
+        task_id=workspace_task_id or task_id,
         label="招标文件",
         original_filename="tender.docx",
         stored_path=str(tmp_path / "raw-tender.docx"),
@@ -156,6 +189,55 @@ async def test_load_task_source_reads_succeeded_markdown_interpretation_and_conf
     assert tender == "# 招标正文\n内容"
     assert interpretation == "# 解读报告\n结论"
     assert configs == [{"id": 1, "title": "资格要求"}]
+
+
+@pytest.mark.asyncio
+async def test_load_task_source_reads_files_off_thread_after_session_closes(
+    tmp_path, client, monkeypatch
+):
+    from app import db
+
+    await _create_task_source(tmp_path)
+    original_session_factory = db.SessionLocal
+    original_read_text = Path.read_text
+    session_open = False
+    read_threads = []
+    main_thread = threading.get_ident()
+
+    class TrackingSessionContext:
+        async def __aenter__(self):
+            nonlocal session_open
+            self.context = original_session_factory()
+            session = await self.context.__aenter__()
+            session_open = True
+            return session
+
+        async def __aexit__(self, *args):
+            nonlocal session_open
+            result = await self.context.__aexit__(*args)
+            session_open = False
+            return result
+
+    def tracked_read_text(path, *args, **kwargs):
+        assert not session_open
+        read_threads.append(threading.get_ident())
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(db, "SessionLocal", TrackingSessionContext)
+    monkeypatch.setattr(Path, "read_text", tracked_read_text)
+
+    await load_task_source("T-CONTEXT")
+
+    assert len(read_threads) == 2
+    assert all(thread_id != main_thread for thread_id in read_threads)
+
+
+@pytest.mark.asyncio
+async def test_load_task_source_rejects_tender_from_another_task(tmp_path, client):
+    await _create_task_source(tmp_path, workspace_task_id="T-OTHER")
+
+    with pytest.raises(ChecklistInputError, match="tender_file_task_mismatch"):
+        await load_task_source("T-CONTEXT")
 
 
 @pytest.mark.asyncio

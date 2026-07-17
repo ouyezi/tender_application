@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,22 +30,10 @@ class PromptContext:
 
 
 def estimate_tokens(text: str) -> int:
-    """Estimate CJK as one token each and other text as four chars per token."""
-    cjk_count = sum(1 for char in text if _is_cjk(char))
-    other_count = len(text) - cjk_count
-    return cjk_count + (other_count + 3) // 4
-
-
-def _is_cjk(char: str) -> bool:
-    codepoint = ord(char)
-    return (
-        0x3400 <= codepoint <= 0x4DBF
-        or 0x4E00 <= codepoint <= 0x9FFF
-        or 0xF900 <= codepoint <= 0xFAFF
-        or 0x20000 <= codepoint <= 0x2FA1F
-        or 0x3040 <= codepoint <= 0x30FF
-        or 0xAC00 <= codepoint <= 0xD7AF
-    )
+    """Estimate non-ASCII as one token each and ASCII as four chars per token."""
+    ascii_count = sum(1 for char in text if char.isascii())
+    non_ascii_count = len(text) - ascii_count
+    return non_ascii_count + (ascii_count + 3) // 4
 
 
 def _max_prefix_end(text: str, start: int, token_budget: int) -> int:
@@ -97,7 +87,7 @@ def split_tender_markdown(
 
     heading_offsets = [
         match.start()
-        for match in re.finditer(r"(?m)^#{1,6}[ \t]+", markdown)
+        for match in re.finditer(r"(?m)^ {0,3}#{1,6}[ \t]+", markdown)
         if match.start() > 0
     ]
     segments: list[str] = []
@@ -106,10 +96,11 @@ def split_tender_markdown(
     text_length = len(markdown)
     while frontier < text_length:
         limit = _max_prefix_end(markdown, start, chunk_tokens)
-        section_ends = [
-            offset for offset in heading_offsets if frontier < offset <= limit
-        ]
-        end = max(section_ends) if section_ends else limit
+        boundary_index = bisect_right(heading_offsets, limit) - 1
+        if boundary_index >= 0 and heading_offsets[boundary_index] > frontier:
+            end = heading_offsets[boundary_index]
+        else:
+            end = limit
         segments.append(markdown[start:end])
         frontier = end
         if frontier == text_length:
@@ -159,14 +150,14 @@ def build_prompt_context(
     )
 
 
-def _read_markdown(path_value: str | None, missing_error: str) -> str:
+async def _read_markdown(path_value: str | None, missing_error: str) -> str:
     if not path_value:
         raise ChecklistInputError(missing_error)
     path = Path(path_value)
-    if not path.is_file():
-        raise ChecklistInputError(missing_error)
     try:
-        return path.read_text(encoding="utf-8")
+        return await asyncio.to_thread(path.read_text, encoding="utf-8")
+    except (FileNotFoundError, IsADirectoryError) as exc:
+        raise ChecklistInputError(missing_error) from exc
     except (OSError, UnicodeError) as exc:
         raise ChecklistInputError(f"{missing_error}_unreadable") from exc
 
@@ -184,24 +175,30 @@ async def load_task_source(
             workspace_file = await session.get(WorkspaceFile, task.tender_file_id)
         if workspace_file is None:
             raise ChecklistInputError("tender_parse_missing")
+        if workspace_file.task_id != task.id:
+            raise ChecklistInputError("tender_file_task_mismatch")
         if workspace_file.parse_status != "succeeded":
             raise ChecklistInputError(
                 f"tender_parse_{workspace_file.parse_status or 'missing'}"
             )
 
-        tender_markdown = _read_markdown(
-            workspace_file.md_path,
-            "tender_markdown_missing",
-        )
-        interpret_markdown = _read_markdown(
-            task.interpret_md_path,
-            "interpret_markdown_missing",
-        )
-        try:
-            admin_configs = json.loads(task.config_snapshot)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ChecklistInputError("config_snapshot_invalid") from exc
-        if not isinstance(admin_configs, list):
-            raise ChecklistInputError("config_snapshot_invalid")
+        tender_md_path = workspace_file.md_path
+        interpret_md_path = task.interpret_md_path
+        config_snapshot = task.config_snapshot
 
-        return task, tender_markdown, interpret_markdown, admin_configs
+    tender_markdown = await _read_markdown(
+        tender_md_path,
+        "tender_markdown_missing",
+    )
+    interpret_markdown = await _read_markdown(
+        interpret_md_path,
+        "interpret_markdown_missing",
+    )
+    try:
+        admin_configs = json.loads(config_snapshot)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ChecklistInputError("config_snapshot_invalid") from exc
+    if not isinstance(admin_configs, list):
+        raise ChecklistInputError("config_snapshot_invalid")
+
+    return task, tender_markdown, interpret_markdown, admin_configs
