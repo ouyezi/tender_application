@@ -19,6 +19,7 @@ from app.models import (
     WorkspaceFile,
     utcnow,
 )
+from app.services.retrieval.fts import create_fts_table_sql
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -90,10 +91,15 @@ def _seed_knowledge_tags_sync(sync_conn) -> None:
         )
 
 
+def _create_fts_table(sync_conn) -> None:
+    sync_conn.execute(text(create_fts_table_sql()))
+
+
 def init_db_on_connection(sync_conn) -> None:
     Base.metadata.create_all(sync_conn)
     _migrate_sqlite_columns(sync_conn)
     _migrate_sqlite_indexes(sync_conn)
+    _create_fts_table(sync_conn)
     _seed_knowledge_tags_sync(sync_conn)
 
 

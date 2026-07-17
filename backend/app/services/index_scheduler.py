@@ -20,6 +20,7 @@ from app import db as database
 from app.config import UPLOAD_DIR
 from app.models import IndexJob, WorkspaceFile, utcnow
 from app.services.retrieval.enricher import MockChunkEnricher
+from app.services.retrieval.fts import rebuild_fts_for_file
 from app.services.retrieval.persist import (
     external_text_paths,
     invalidate_file_index,
@@ -169,6 +170,7 @@ async def _run_job(job_id: int) -> None:
             )
             old_text_paths = await invalidate_file_index(session, task_id, file_id)
             await write_segments(session, task_id, file_id, segments, text_dir)
+            await rebuild_fts_for_file(session, task_id, file_id)
             job = await session.get(IndexJob, job_id)
             if job is not None:
                 job.status = "ready"
