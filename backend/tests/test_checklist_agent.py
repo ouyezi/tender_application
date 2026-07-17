@@ -109,6 +109,19 @@ async def test_generate_creates_only_categories_used_by_content():
 
 
 @pytest.mark.asyncio
+async def test_generate_uses_general_category_for_text_without_category_keywords():
+    agent = MockChecklistAgent()
+
+    draft = await agent.generate(
+        task_id="TASK-GENERAL",
+        context=_context("# 其他要求\n投标文件应按规定装订并提交"),
+    )
+
+    assert {category.name for category in draft.categories} == {"综合响应材料"}
+    assert draft.items[0].category_id == draft.categories[0].id
+
+
+@pytest.mark.asyncio
 async def test_generate_is_deterministic_for_same_input():
     context = _context("# 投标要求\n投标文件须按时递交。")
 
