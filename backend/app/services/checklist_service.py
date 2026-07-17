@@ -108,6 +108,153 @@ class ChecklistValidationError(RuntimeError):
     pass
 
 
+class ChecklistTaskNotFound(LookupError):
+    pass
+
+
+class ChecklistNotAvailable(LookupError):
+    pass
+
+
+def _load_json_list(raw: str, *, entries: type | None = None) -> list[Any]:
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ChecklistValidationError("stored checklist JSON is invalid") from exc
+    if not isinstance(value, list) or (
+        entries is not None
+        and any(
+            not isinstance(entry, entries)
+            or (entries is int and isinstance(entry, bool))
+            for entry in value
+        )
+    ):
+        raise ChecklistValidationError("stored checklist JSON is invalid")
+    return value
+
+
+def _load_json_rules(raw: str) -> dict[str, str]:
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ChecklistValidationError("stored checklist JSON is invalid") from exc
+    if not isinstance(value, dict) or any(
+        not isinstance(key, str) or not isinstance(rule, str)
+        for key, rule in value.items()
+    ):
+        raise ChecklistValidationError("stored checklist JSON is invalid")
+    return value
+
+
+async def get_report(task_id: str) -> dict[str, Any]:
+    async with db.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            raise ChecklistTaskNotFound(task_id)
+        if task.current_checklist_generation_id is None:
+            raise ChecklistNotAvailable(task_id)
+
+        generation = await session.get(
+            ChecklistGeneration,
+            task.current_checklist_generation_id,
+        )
+        if (
+            generation is None
+            or generation.task_id != task_id
+            or generation.status != "succeeded"
+        ):
+            raise ChecklistNotAvailable(task_id)
+        categories = list(
+            (
+                await session.scalars(
+                    select(ChecklistCategory)
+                    .where(ChecklistCategory.generation_id == generation.id)
+                    .order_by(ChecklistCategory.sort_order, ChecklistCategory.id)
+                )
+            ).all()
+        )
+        items = list(
+            (
+                await session.scalars(
+                    select(ChecklistItem)
+                    .where(ChecklistItem.generation_id == generation.id)
+                    .order_by(ChecklistItem.sort_order, ChecklistItem.id)
+                )
+            ).all()
+        )
+
+    item_groups: dict[str, list[dict[str, Any]]] = {
+        category.id: [] for category in categories
+    }
+    importance_counts = {"high": 0, "medium": 0, "low": 0}
+    for item in items:
+        if item.category_id not in item_groups or item.importance not in importance_counts:
+            raise ChecklistValidationError("stored checklist data is invalid")
+        item_groups[item.category_id].append(
+            {
+                "id": item.id,
+                "title": item.title,
+                "requirement": item.requirement,
+                "technique": item.technique,
+                "importance": item.importance,
+                "source_references": _load_json_list(
+                    item.source_references,
+                    entries=dict,
+                ),
+                "retrieval_hints": _load_json_list(
+                    item.retrieval_hints,
+                    entries=str,
+                ),
+                "expected_evidence": _load_json_list(
+                    item.expected_evidence,
+                    entries=str,
+                ),
+                "compliance_rules": _load_json_rules(item.compliance_rules),
+                "consequence_rules": _load_json_rules(item.consequence_rules),
+                "admin_config_refs": _load_json_list(
+                    item.admin_config_refs,
+                    entries=int,
+                ),
+                "sort_order": item.sort_order,
+            }
+        )
+        importance_counts[item.importance] += 1
+
+    category_payloads = [
+        {
+            "id": category.id,
+            "name": category.name,
+            "description": category.description,
+            "retrieval_query": category.retrieval_query,
+            "expected_locations": _load_json_list(
+                category.expected_locations,
+                entries=str,
+            ),
+            "sort_order": category.sort_order,
+            "items": item_groups[category.id],
+        }
+        for category in categories
+    ]
+    return {
+        "generation": {
+            "id": generation.id,
+            "status": generation.status,
+            "agent_type": generation.agent_type,
+            "agent_version": generation.agent_version,
+            "schema_version": generation.schema_version,
+            "error_message": generation.error_message,
+            "created_at": generation.created_at,
+            "finished_at": generation.finished_at,
+        },
+        "summary": {
+            "category_count": len(categories),
+            "item_count": len(items),
+            "importance_counts": importance_counts,
+        },
+        "categories": category_payloads,
+    }
+
+
 def _require_nonempty_string(value: Any, field: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ChecklistValidationError(f"{field} must be a non-empty string")

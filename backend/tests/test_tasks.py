@@ -42,7 +42,7 @@ async def test_create_and_get_task(client):
         "paused",
     )
     assert body["tender_filename"] == "tender.pdf"
-    assert body["progress_total"] == 1
+    assert body["progress_total"] == 0
 
     r2 = await client.get(f"/api/tasks/{body['id']}")
     assert r2.status_code == 200

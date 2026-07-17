@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ContentMode = Literal["full_text", "description"]
 Importance = Literal["high", "medium", "low"]
@@ -47,13 +48,79 @@ class ResultOut(BaseModel):
     id: int
     task_id: str
     config_id: Optional[int]
+    checklist_item_id: Optional[str] = None
     content_title: str
     description: str
     result: str
     evidence: str
     suggestion: str
+    compliance_status: Optional[str] = None
+    consequence_tags: List[str] = Field(default_factory=list)
     sort_order: int
     created_at: datetime
+
+    @field_validator("consequence_tags", mode="before")
+    @classmethod
+    def deserialize_consequence_tags(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid consequence tags") from exc
+        if not isinstance(decoded, list) or any(
+            not isinstance(tag, str) for tag in decoded
+        ):
+            raise ValueError("invalid consequence tags")
+        return decoded
+
+
+class ChecklistItemOut(BaseModel):
+    id: str
+    title: str
+    requirement: str
+    technique: str
+    importance: str
+    source_references: List[dict]
+    retrieval_hints: List[str]
+    expected_evidence: List[str]
+    compliance_rules: dict[str, str]
+    consequence_rules: dict[str, str]
+    admin_config_refs: List[int]
+    sort_order: int
+
+
+class ChecklistCategoryOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    retrieval_query: str
+    expected_locations: List[str]
+    sort_order: int
+    items: List[ChecklistItemOut]
+
+
+class ChecklistGenerationOut(BaseModel):
+    id: int
+    status: str
+    agent_type: str
+    agent_version: str
+    schema_version: str
+    error_message: Optional[str]
+    created_at: datetime
+    finished_at: Optional[datetime]
+
+
+class ChecklistSummaryOut(BaseModel):
+    category_count: int
+    item_count: int
+    importance_counts: dict[str, int]
+
+
+class ChecklistReportOut(BaseModel):
+    generation: ChecklistGenerationOut
+    summary: ChecklistSummaryOut
+    categories: List[ChecklistCategoryOut]
 
 
 class TaskListOut(BaseModel):

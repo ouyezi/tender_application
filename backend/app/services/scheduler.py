@@ -9,7 +9,7 @@ from app import db as database
 from app.config import MOCK_ITEM_DELAY_SECONDS, MOCK_INTERPRET_DELAY_SECONDS
 from app.engine.interpretation_mock import MockInterpretationAgent
 from app.engine.mock import MockEngine
-from app.models import DiagnosisResult, DiagnosisTask, utcnow
+from app.models import DiagnosisResult, DiagnosisTask, WorkspaceFile, utcnow
 from app.services import interpret_report, report
 
 
@@ -97,6 +97,40 @@ async def start_task(task_id: str) -> None:
     ctrl.pause_event.set()
     ctrl.done_event.clear()
     ctrl.bg_task = asyncio.create_task(_run(task_id))
+
+
+async def retry_checklist(task_id: str) -> DiagnosisTask:
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            raise LookupError(task_id)
+        if task.status != "failed":
+            raise SchedulerConflict("invalid_task_status")
+        if task.current_checklist_generation_id is not None:
+            raise SchedulerConflict("checklist_already_available")
+        if not task.interpret_md_path:
+            raise SchedulerConflict("interpret_not_available")
+        workspace_file = (
+            await session.get(WorkspaceFile, task.tender_file_id)
+            if task.tender_file_id
+            else None
+        )
+        if workspace_file is None or workspace_file.task_id != task_id:
+            raise SchedulerConflict("tender_parse_missing")
+        if workspace_file.parse_status != "succeeded":
+            parse_status = workspace_file.parse_status or "missing"
+            raise SchedulerConflict(f"tender_parse_{parse_status}")
+
+        task.status = "generating_checklist"
+        task.error_message = None
+        task.finished_at = None
+        task.updated_at = utcnow()
+        await session.commit()
+        await session.refresh(task)
+        prepared = task
+
+    await start_task(task_id)
+    return prepared
 
 
 async def pause_task(task_id: str) -> DiagnosisTask:
@@ -239,6 +273,10 @@ async def _run(task_id: str) -> None:
 
             snapshot: list[dict[str, Any]] = json.loads(task.config_snapshot or "[]")
             start_idx = task.progress_done
+            if task.progress_total != len(snapshot):
+                task.progress_total = len(snapshot)
+                task.updated_at = utcnow()
+                await session.commit()
             tender_path = task.tender_path
             bid_path = task.bid_path
             background = task.background or ""

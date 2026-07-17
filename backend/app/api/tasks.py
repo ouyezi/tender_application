@@ -13,8 +13,13 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
-from app.schemas import TaskListOut, TaskOut
-from app.services import files, parse_scheduler, scheduler, workspace
+from app.schemas import ChecklistReportOut, TaskListOut, TaskOut
+from app.services import checklist_service, files, parse_scheduler, scheduler, workspace
+from app.services.checklist_service import (
+    ChecklistNotAvailable,
+    ChecklistTaskNotFound,
+    ChecklistValidationError,
+)
 from app.services.scheduler import SchedulerConflict
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -128,7 +133,7 @@ async def create_task(
         requirements=requirements,
         status="interpreting",
         progress_done=0,
-        progress_total=len(snapshot),
+        progress_total=0,
         config_snapshot=json.dumps(snapshot, ensure_ascii=False),
     )
     db.add(task)
@@ -167,6 +172,45 @@ async def get_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut:
         report_markdown=_read_report_markdown(task),
         interpret_markdown=_read_interpret_markdown(task),
     )
+
+
+@router.get("/{task_id}/checklist", response_model=ChecklistReportOut)
+async def get_checklist(task_id: str) -> ChecklistReportOut:
+    try:
+        report = await checklist_service.get_report(task_id)
+    except ChecklistTaskNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
+    except ChecklistNotAvailable:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Checklist not available",
+        )
+    except ChecklistValidationError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="checklist_data_invalid",
+        )
+    return ChecklistReportOut.model_validate(report)
+
+
+@router.post("/{task_id}/checklist/retry", status_code=status.HTTP_202_ACCEPTED)
+async def retry_checklist(task_id: str) -> dict[str, str]:
+    try:
+        await scheduler.retry_checklist(task_id)
+    except LookupError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
+    except SchedulerConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    return {"task_id": task_id, "status": "generating_checklist"}
 
 
 async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
