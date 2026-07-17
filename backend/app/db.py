@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy import inspect, text, update
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.schema import CreateColumn
+from sqlalchemy.schema import CreateColumn, CreateIndex
 
 from app.config import DATABASE_URL
 from app.models import Base, DiagnosisTask, ParseJob, WorkspaceFile, utcnow
@@ -37,9 +37,26 @@ def _migrate_sqlite_columns(sync_conn) -> None:
             sync_conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column_ddl}"))
 
 
+def _migrate_sqlite_indexes(sync_conn) -> None:
+    """Create non-unique metadata indexes missing from existing SQLite tables."""
+    inspector = inspect(sync_conn)
+    for table in Base.metadata.tables.values():
+        if not inspector.has_table(table.name):
+            continue
+        existing_columns = {
+            column["name"] for column in inspector.get_columns(table.name)
+        }
+        for index in table.indexes:
+            index_columns = {column.name for column in index.columns}
+            if index.unique or not index_columns.issubset(existing_columns):
+                continue
+            sync_conn.execute(CreateIndex(index, if_not_exists=True))
+
+
 def init_db_on_connection(sync_conn) -> None:
     Base.metadata.create_all(sync_conn)
     _migrate_sqlite_columns(sync_conn)
+    _migrate_sqlite_indexes(sync_conn)
 
 
 async def init_db() -> None:

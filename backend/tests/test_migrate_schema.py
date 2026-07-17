@@ -127,4 +127,33 @@ async def test_migrate_adds_tender_file_id_to_legacy_tasks_table(tmp_path, monke
             "checklist_items",
         }
 
+        result_columns = {
+            row[1]
+            for row in (
+                await conn.execute(text("PRAGMA table_info('diagnosis_results')"))
+            ).fetchall()
+        }
+        assert {
+            "checklist_item_id",
+            "compliance_status",
+            "consequence_tags",
+        }.issubset(result_columns)
+
+        index_names = [
+            row[1]
+            for row in (
+                await conn.execute(text("PRAGMA index_list('diagnosis_results')"))
+            ).fetchall()
+        ]
+        indexed_columns = {
+            tuple(
+                row[2]
+                for row in (
+                    await conn.execute(text(f"PRAGMA index_info('{index_name}')"))
+                ).fetchall()
+            )
+            for index_name in index_names
+        }
+        assert ("checklist_item_id",) in indexed_columns
+
     await engine.dispose()

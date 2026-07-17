@@ -39,7 +39,7 @@ async def test_create_and_read_diagnosis_config(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_persist_checklist_generation_and_diagnosis_result(tmp_path):
+async def test_persist_task_checklist_and_structured_result(tmp_path):
     db_path = tmp_path / "test.db"
     url = f"sqlite+aiosqlite:///{db_path}"
     engine = create_async_engine(url, echo=False)
@@ -82,11 +82,11 @@ async def test_persist_checklist_generation_and_diagnosis_result(tmp_path):
             requirement="营业执照必须有效",
             technique="核对有效期",
             importance="high",
-            source_references="[]",
-            retrieval_hints="[]",
-            expected_evidence="[]",
-            compliance_rules="[]",
-            consequence_rules="[]",
+            source_references='["招标文件第 3 页"]',
+            retrieval_hints='["营业执照"]',
+            expected_evidence='["有效营业执照"]',
+            compliance_rules='["证照在有效期内"]',
+            consequence_rules='["无效时标记重大风险"]',
         )
         session.add_all([category, item])
         await session.flush()
@@ -108,9 +108,57 @@ async def test_persist_checklist_generation_and_diagnosis_result(tmp_path):
     async with session_factory() as session:
         fetched_task = await session.get(DiagnosisTask, "task-checklist")
         fetched_result = await session.get(DiagnosisResult, result_id)
+        fetched_generation = await session.get(
+            models.ChecklistGeneration, generation_id
+        )
+        fetched_category = await session.get(
+            models.ChecklistCategory, "category-qualification"
+        )
+        fetched_item = await session.get(
+            models.ChecklistItem, "item-business-license"
+        )
         assert fetched_task is not None
         assert fetched_result is not None
+        assert fetched_generation is not None
+        assert fetched_category is not None
+        assert fetched_item is not None
+
         assert fetched_task.current_checklist_generation_id == generation_id
+
+        assert fetched_generation.task_id == "task-checklist"
+        assert fetched_generation.status == "completed"
+        assert fetched_generation.agent_type == "mock"
+        assert fetched_generation.agent_version == "1"
+        assert fetched_generation.schema_version == "1"
+        assert fetched_generation.input_hash == "input-hash"
+        assert fetched_generation.admin_config_snapshot == "[]"
+        assert fetched_generation.raw_response_path is None
+        assert fetched_generation.error_message is None
+        assert fetched_generation.created_at is not None
+        assert fetched_generation.finished_at is None
+
+        assert fetched_category.generation_id == generation_id
+        assert fetched_category.name == "资格要求"
+        assert fetched_category.description == "检查投标人资格"
+        assert fetched_category.retrieval_query == "资格证书"
+        assert fetched_category.expected_locations == "[]"
+        assert fetched_category.sort_order == 0
+
+        assert fetched_item.generation_id == generation_id
+        assert fetched_item.category_id == "category-qualification"
+        assert fetched_item.title == "营业执照"
+        assert fetched_item.requirement == "营业执照必须有效"
+        assert fetched_item.technique == "核对有效期"
+        assert fetched_item.importance == "high"
+        assert fetched_item.source_references == '["招标文件第 3 页"]'
+        assert fetched_item.retrieval_hints == '["营业执照"]'
+        assert fetched_item.expected_evidence == '["有效营业执照"]'
+        assert fetched_item.compliance_rules == '["证照在有效期内"]'
+        assert fetched_item.consequence_rules == '["无效时标记重大风险"]'
+        assert fetched_item.admin_config_refs == "[]"
+        assert fetched_item.sort_order == 0
+        assert fetched_item.created_at is not None
+
         assert fetched_result.checklist_item_id == "item-business-license"
         assert fetched_result.compliance_status == "satisfied"
         assert fetched_result.consequence_tags == '["general_risk"]'
