@@ -84,3 +84,41 @@ class ChecklistAgent(Protocol):
         task_id: str,
         context: PromptContext,
     ) -> ChecklistDraft: ...
+
+
+@dataclass
+class RetrievedChunk:
+    chunk_id: str
+    text: str
+    location: str = ""
+
+
+class RetrievalProvider(Protocol):
+    async def retrieve_for_category(
+        self,
+        *,
+        task_id: str,
+        category: dict[str, Any],
+        items: list[dict[str, Any]],
+    ) -> list[RetrievedChunk]: ...
+
+
+@dataclass
+class BatchItemResult:
+    checklist_item_id: int
+    compliance: str  # satisfied | violated | cannot_satisfy | insufficient_evidence
+    consequence_tags: list[str]
+    evidence: str
+    suggestion: str
+    description: str = ""
+
+
+class BatchDiagnosisEngine(Protocol):
+    async def diagnose_category(
+        self,
+        *,
+        task_id: str,
+        category: dict[str, Any],
+        items: list[dict[str, Any]],
+        retrieved_chunks: list[RetrievedChunk],
+    ) -> list[BatchItemResult]: ...

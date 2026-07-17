@@ -13,6 +13,7 @@ from sqlalchemy import delete, select, update
 
 from app import config, db
 from app.engine.base import (
+    BatchItemResult,
     ChecklistAgent,
     ChecklistCategoryDraft,
     ChecklistDraft,
@@ -114,6 +115,18 @@ class ChecklistTaskNotFound(LookupError):
 
 class ChecklistNotAvailable(LookupError):
     pass
+
+
+def assert_batch_complete(
+    items: list[dict[str, Any]],
+    results: list[BatchItemResult],
+) -> None:
+    expected_ids = {item["id"] for item in items}
+    result_ids = [result.checklist_item_id for result in results]
+    if len(result_ids) != len(set(result_ids)):
+        raise ValueError("batch diagnosis result mapping contains duplicate item ids")
+    if set(result_ids) != expected_ids:
+        raise ValueError("batch diagnosis result mapping does not match items")
 
 
 def _load_json_list(raw: str, *, entries: type | None = None) -> list[Any]:
