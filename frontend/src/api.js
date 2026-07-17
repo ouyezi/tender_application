@@ -97,3 +97,11 @@ export function reparseWorkspaceFile(taskId, fileId) {
 export function workspaceFileDownloadUrl(taskId, fileId) {
   return `/api/workspaces/${taskId}/files/${fileId}/download`
 }
+
+export function getChecklist(taskId) {
+  return request(`/api/tasks/${taskId}/checklist`)
+}
+
+export function retryChecklist(taskId) {
+  return request(`/api/tasks/${taskId}/checklist/retry`, { method: 'POST' })
+}
