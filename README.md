@@ -15,7 +15,9 @@ python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
 ```
 
-主要 Python 依赖：`fastapi`、`python-docx`（DOCX 解析）、`pymupdf`（PDF 转 Markdown）。
+主要 Python 依赖：`fastapi`、`python-docx`（DOCX 解析）、`pymupdf`（PDF 转 Markdown）、`pytesseract` 与 `Pillow`（稀疏 PDF 页 OCR）。
+
+PDF OCR 还需在系统上安装 [Tesseract](https://github.com/tesseract-ocr/tesseract) 二进制（含 `chi_sim` 与 `eng` 语言包）。macOS 示例：`brew install tesseract tesseract-lang`。未安装时 OCR 会写入解析警告，不会阻断整条流水线。
 
 ### 前端依赖
 

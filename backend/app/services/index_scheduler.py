@@ -31,6 +31,7 @@ from app.services.retrieval.persist import (
 from app.services.retrieval.vectors import VectorIndex, get_embedding_model
 from app.services.retrieval.wiki import MockWikiBuilder
 from app.services.retrieval.segments import materialize_segments
+from app.services.retrieval.table_text import merge_table_text_into_segments
 from app.services.retrieval.tags import load_tag_catalog
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,8 @@ async def _run_job(job_id: int) -> None:
         tree = json.loads(Path(tree_path).read_text(encoding="utf-8"))
         fine_chunks = json.loads(Path(chunks_path).read_text(encoding="utf-8"))
         segments = materialize_segments(markdown, tree, fine_chunks)
+        table_dir = config.UPLOAD_DIR / task_id / "table" / file_id
+        segments = merge_table_text_into_segments(markdown, tree, segments, table_dir)
         text_dir = config.UPLOAD_DIR / task_id / "index_text"
 
         new_text_paths = external_text_paths(segments, text_dir)

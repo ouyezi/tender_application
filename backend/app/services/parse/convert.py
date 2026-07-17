@@ -110,19 +110,28 @@ def _pdf_heading_level(size: float, body_size: float, heading_sizes: list[float]
     return 6
 
 
-def convert_pdf_to_markdown(path: str | Path, image_dir: str | Path) -> str:
+def convert_pdf_to_markdown(
+    path: str | Path,
+    image_dir: str | Path,
+    *,
+    warnings: list[str] | None = None,
+) -> str:
     """Convert a ``.pdf`` file to markdown text using PyMuPDF.
 
     Lines with a font size noticeably larger than the document's most common
     (body) font size are promoted to ATX headings, ranked by distinct font
     size (largest first). Embedded images are dumped under ``image_dir`` and
-    referenced with a markdown link.
+    referenced with a markdown link. Pages with sparse native text are OCR'd
+    when possible (see ``app.services.parse.ocr``).
     """
     import fitz  # PyMuPDF
+
+    from app.services.parse.ocr import DEFAULT_MIN_OCR_CHARS, maybe_ocr_page_text
 
     path = Path(path)
     image_dir = Path(image_dir)
     image_dir.mkdir(parents=True, exist_ok=True)
+    page_warnings: list[str] = warnings if warnings is not None else []
 
     doc = fitz.open(str(path))
     try:
@@ -154,11 +163,28 @@ def convert_pdf_to_markdown(path: str | Path, image_dir: str | Path) -> str:
         image_counter = [0]
         lines: list[str] = []
         for page_index, page_lines in enumerate(pages):
+            page = doc[page_index]
+            native_text = "\n".join(text for _, text in page_lines)
+            ocr_image_path = image_dir / f"page_{page_index + 1:03d}_ocr.png"
+            try:
+                pix = page.get_pixmap(dpi=200)
+                pix.save(str(ocr_image_path))
+            except Exception as exc:
+                page_warnings.append(f"ocr_render_failed:page_{page_index + 1}:{exc}")
+
+            merged_text = maybe_ocr_page_text(
+                native_text,
+                ocr_image_path,
+                min_chars=DEFAULT_MIN_OCR_CHARS,
+                warnings=page_warnings,
+            )
+            if merged_text.strip() and merged_text.strip() != native_text.strip():
+                page_lines = [(body_size, line) for line in merged_text.splitlines() if line.strip()]
+
             for size, text in page_lines:
                 level = _pdf_heading_level(size, body_size, heading_sizes)
                 lines.append(f"{'#' * level} {text}" if level else text)
 
-            page = doc[page_index]
             for img in page.get_images(full=True):
                 xref = img[0]
                 try:

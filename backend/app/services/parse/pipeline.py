@@ -76,7 +76,14 @@ async def run_parse_pipeline(file_id: str, task_id: str, stored_path: str) -> di
         if ext == ".docx":
             markdown = await asyncio.to_thread(convert_mod.convert_docx_to_markdown, src_path, image_dir)
         else:
-            markdown = await asyncio.to_thread(convert_mod.convert_pdf_to_markdown, src_path, image_dir)
+            convert_warnings: list[str] = []
+            markdown = await asyncio.to_thread(
+                convert_mod.convert_pdf_to_markdown,
+                src_path,
+                image_dir,
+                warnings=convert_warnings,
+            )
+            warnings.extend(convert_warnings)
     except Exception as exc:
         return _result("failed", error=f"convert_failed: {exc}")
 
