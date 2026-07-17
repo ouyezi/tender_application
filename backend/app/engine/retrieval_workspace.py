@@ -10,6 +10,14 @@ from app.services.retrieval import provider as retrieval_provider
 class WorkspaceRetrievalProvider:
     """Real retrieval provider backed by workspace knowledge chunks."""
 
+    async def _ai_rerank(
+        self,
+        session,
+        requirement: str,
+        hits,
+    ):
+        return await retrieval_provider.ai_rerank_hits(session, requirement, hits)
+
     async def retrieve(
         self,
         *,
@@ -25,6 +33,7 @@ class WorkspaceRetrievalProvider:
                 content_source=content_source,
                 content_target=content_target,
                 item_hints=item_hints,
+                ai_rerank=self._ai_rerank,
             )
 
     async def retrieve_for_category(

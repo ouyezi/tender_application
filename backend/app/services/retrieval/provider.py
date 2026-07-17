@@ -7,11 +7,24 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import INDEX_TAG_MIN_CONFIDENCE
+from app.config import (
+    INDEX_TAG_MIN_CONFIDENCE,
+    PRECISE_SEARCH_CHANNEL_WEIGHT_FTS,
+    PRECISE_SEARCH_CHANNEL_WEIGHT_VECTOR,
+    PRECISE_SEARCH_CHANNEL_WEIGHT_WIKI,
+    PRECISE_SEARCH_RECALL_PER_CHANNEL,
+    PRECISE_SEARCH_TOP_K,
+    UPLOAD_DIR,
+)
 from app.engine.base import RetrievalHit, RetrievalResult
 from app.models import DiagnosisTask, IndexJob, KnowledgeChunk, WorkspaceFile
+from app.services.retrieval.fts import search_fts
 from app.services.retrieval.persist import load_chunk_text
+from app.services.retrieval.rerank import AiReranker, MockAiReranker
+from app.services.retrieval.rewrite import MockQueryRewriter, QueryRewriter
 from app.services.retrieval.tags import load_tag_catalog, validate_target_tags
+from app.services.retrieval.vectors import VectorIndex, get_embedding_model
+from app.services.retrieval.wiki import search_wiki
 
 
 async def _task_index_status(session: AsyncSession, task_id: str) -> tuple[str, bool]:
@@ -171,6 +184,235 @@ async def _expand_fine_to_large(
     return out
 
 
+def _get_query_rewriter() -> QueryRewriter:
+    return MockQueryRewriter()
+
+
+def _get_ai_reranker() -> AiReranker:
+    return MockAiReranker()
+
+
+async def ai_rerank_hits(
+    session: AsyncSession,
+    requirement: str,
+    hits: list[RetrievalHit],
+) -> list[str]:
+    del session
+    reranker = _get_ai_reranker()
+    return await reranker.rerank(requirement, hits)
+
+
+def _normalize_bm25_scores(scores: list[float]) -> list[float]:
+    if not scores:
+        return []
+    max_score = max(abs(score) for score in scores) or 1.0
+    return [abs(score) / max_score for score in scores]
+
+
+def _merge_channel_scores(
+    vector_hits: list[tuple[str, float]],
+    fts_hits: list[dict[str, object]],
+    wiki_hits: list[tuple[str, float]],
+) -> dict[str, float]:
+    merged: dict[str, float] = {}
+
+    for chunk_id, score in vector_hits:
+        merged[chunk_id] = merged.get(chunk_id, 0.0) + (
+            PRECISE_SEARCH_CHANNEL_WEIGHT_VECTOR * score
+        )
+
+    bm25_norm = _normalize_bm25_scores(
+        [float(hit["score"]) for hit in fts_hits]
+    )
+    for hit, norm in zip(fts_hits, bm25_norm):
+        chunk_id = str(hit["chunk_id"])
+        merged[chunk_id] = merged.get(chunk_id, 0.0) + (
+            PRECISE_SEARCH_CHANNEL_WEIGHT_FTS * norm
+        )
+
+    for chunk_id, boost in wiki_hits:
+        merged[chunk_id] = merged.get(chunk_id, 0.0) + (
+            PRECISE_SEARCH_CHANNEL_WEIGHT_WIKI * boost
+        )
+
+    return merged
+
+
+async def _search_vector_channel(
+    session: AsyncSession,
+    task_id: str,
+    vector_query: str,
+    *,
+    limit: int,
+) -> list[tuple[str, float]]:
+    result = await session.execute(
+        select(KnowledgeChunk.file_id)
+        .where(
+            KnowledgeChunk.task_id == task_id,
+            KnowledgeChunk.segment_level == "fine",
+            KnowledgeChunk.embedding_status == "ready",
+        )
+        .distinct()
+    )
+    file_ids = [row[0] for row in result.all()]
+    if not file_ids:
+        return []
+
+    model = get_embedding_model()
+    query_vec = model.embed(vector_query)
+    hits: list[tuple[str, float]] = []
+
+    for file_id in file_ids:
+        index = VectorIndex(UPLOAD_DIR / task_id / "vectors" / file_id)
+        hits.extend(index.search(query_vec, top_k=limit))
+
+    hits.sort(key=lambda item: item[1], reverse=True)
+    return hits[:limit]
+
+
+async def _precise_search(
+    session: AsyncSession,
+    task_id: str,
+    content_target: dict[str, Any],
+    item_hints: dict[str, Any] | None,
+    index_status: str,
+    incomplete: bool,
+    *,
+    ai_rerank=None,
+) -> RetrievalResult:
+    query = str(content_target.get("query") or "").strip()
+    hints = list((item_hints or {}).get("retrieval_hints") or [])
+    if not query and not hints:
+        return RetrievalResult(
+            mode="precise_search",
+            items=[],
+            index_status=index_status,
+            incomplete=incomplete,
+            error="missing query",
+        )
+
+    degraded = False
+    rewrite = {
+        "vector_query": query or " ".join(hints),
+        "keywords": hints or ([query] if query else []),
+        "wiki_query": query or " ".join(hints),
+    }
+    try:
+        rewrite = await _get_query_rewriter().rewrite(query, hints)
+    except Exception:
+        degraded = True
+
+    vector_query = str(rewrite.get("vector_query") or query)
+    keywords = [str(k) for k in rewrite.get("keywords") or [] if str(k).strip()]
+    wiki_query = str(rewrite.get("wiki_query") or query)
+    fts_query = " ".join(keywords) if keywords else vector_query
+
+    recall_limit = PRECISE_SEARCH_RECALL_PER_CHANNEL
+    vector_hits = await _search_vector_channel(
+        session, task_id, vector_query, limit=recall_limit
+    )
+    fts_hits = await search_fts(
+        session, task_id, fts_query, limit=recall_limit
+    )
+    wiki_hits = await search_wiki(
+        session, task_id, wiki_query, limit=recall_limit
+    )
+
+    merged_scores = _merge_channel_scores(vector_hits, fts_hits, wiki_hits)
+    if not merged_scores:
+        return RetrievalResult(
+            mode="precise_search",
+            items=[],
+            index_status=index_status,
+            incomplete=incomplete,
+            degraded=degraded,
+        )
+
+    chunk_result = await session.execute(
+        select(KnowledgeChunk).where(
+            KnowledgeChunk.task_id == task_id,
+            KnowledgeChunk.chunk_id.in_(list(merged_scores.keys())),
+        )
+    )
+    chunk_by_id = {chunk.chunk_id: chunk for chunk in chunk_result.scalars().all()}
+
+    ranked_ids = sorted(
+        merged_scores,
+        key=lambda chunk_id: merged_scores[chunk_id],
+        reverse=True,
+    )[:PRECISE_SEARCH_TOP_K]
+
+    candidate_hits: list[RetrievalHit] = []
+    for chunk_id in ranked_ids:
+        chunk = chunk_by_id.get(chunk_id)
+        if chunk is None:
+            continue
+        hit = _chunk_to_hit(chunk)
+        hit.score = merged_scores[chunk_id]
+        candidate_hits.append(hit)
+
+    rerank_fn = ai_rerank or ai_rerank_hits
+    try:
+        reranked_ids = await rerank_fn(
+            session,
+            query or fts_query,
+            candidate_hits,
+        )
+    except Exception:
+        degraded = True
+        reranked_ids = [hit.chunk_id for hit in candidate_hits]
+
+    order = {chunk_id: idx for idx, chunk_id in enumerate(reranked_ids)}
+    candidate_hits.sort(
+        key=lambda hit: (order.get(hit.chunk_id, len(order)), -hit.score)
+    )
+
+    fine_chunks = [
+        chunk_by_id[hit.chunk_id]
+        for hit in candidate_hits
+        if hit.chunk_id in chunk_by_id
+        and chunk_by_id[hit.chunk_id].segment_level == "fine"
+    ]
+    all_chunks_result = await session.execute(
+        select(KnowledgeChunk).where(KnowledgeChunk.task_id == task_id)
+    )
+    all_chunks = all_chunks_result.scalars().all()
+    large_by_node = {
+        chunk.node_id: chunk
+        for chunk in all_chunks
+        if chunk.segment_level == "large"
+    }
+
+    expanded = await _expand_fine_to_large(
+        session, task_id, fine_chunks, large_by_node
+    )
+    expanded_by_id = {chunk.chunk_id: chunk for chunk in expanded}
+    fine_ids = {chunk.chunk_id for chunk in fine_chunks}
+
+    final_hits: list[RetrievalHit] = []
+    seen: set[str] = set()
+    for hit in candidate_hits:
+        chunk = chunk_by_id.get(hit.chunk_id)
+        if chunk is None:
+            continue
+        if chunk.chunk_id in fine_ids and chunk.chunk_id in expanded_by_id:
+            chunk = expanded_by_id[chunk.chunk_id]
+        if chunk.chunk_id in seen:
+            continue
+        seen.add(chunk.chunk_id)
+        final_hit = _chunk_to_hit(chunk)
+        final_hit.score = hit.score
+        final_hits.append(final_hit)
+
+    return RetrievalResult(
+        mode="precise_search",
+        items=final_hits,
+        index_status=index_status,
+        incomplete=incomplete,
+        degraded=degraded,
+    )
+
+
 async def _collection(
     session: AsyncSession,
     task_id: str,
@@ -295,9 +537,8 @@ async def retrieve(
     content_source: str,
     content_target: dict[str, Any],
     item_hints: dict[str, Any] | None = None,
+    ai_rerank=None,
 ) -> RetrievalResult:
-    del item_hints
-
     if not content_source:
         return RetrievalResult(
             mode="",
@@ -321,12 +562,14 @@ async def retrieve(
             session, task_id, content_target, index_status, incomplete
         )
     if content_source == "precise_search":
-        return RetrievalResult(
-            mode="precise_search",
-            items=[],
-            index_status=index_status,
-            incomplete=incomplete,
-            error="not_implemented",
+        return await _precise_search(
+            session,
+            task_id,
+            content_target,
+            item_hints,
+            index_status,
+            incomplete,
+            ai_rerank=ai_rerank,
         )
 
     return RetrievalResult(

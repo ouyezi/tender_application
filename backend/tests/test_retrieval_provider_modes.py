@@ -239,14 +239,14 @@ async def test_missing_content_source_is_config_error(provider):
 
 
 @pytest.mark.asyncio
-async def test_precise_search_not_implemented(provider, indexed_bid_task):
+async def test_precise_search_returns_results(provider, indexed_bid_task):
     result = await provider.retrieve(
         task_id=indexed_bid_task,
         content_source="precise_search",
-        content_target={"query": "退款政策"},
+        content_target={"query": "技术方案"},
     )
     assert result.mode == "precise_search"
-    assert result.error == "not_implemented"
+    assert result.error is None
 
 
 @pytest.mark.asyncio

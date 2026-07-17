@@ -29,6 +29,7 @@ from app.services.retrieval.persist import (
     write_segments,
 )
 from app.services.retrieval.vectors import VectorIndex, get_embedding_model
+from app.services.retrieval.wiki import MockWikiBuilder
 from app.services.retrieval.segments import materialize_segments
 from app.services.retrieval.tags import load_tag_catalog
 
@@ -145,6 +146,11 @@ async def _rebuild_vectors_for_file(
         chunk.embedding_status = "ready"
 
 
+async def _rebuild_wiki_for_task(session, task_id: str) -> None:
+    """Aggregate fine chunks by tag into task-level wiki pages."""
+    await MockWikiBuilder().build_for_task(session, task_id)
+
+
 async def _claim_next_queued() -> Optional[int]:
     async with database.SessionLocal() as session:
         result = await session.execute(
@@ -211,6 +217,7 @@ async def _run_job(job_id: int) -> None:
             await write_segments(session, task_id, file_id, segments, text_dir)
             await rebuild_fts_for_file(session, task_id, file_id)
             await _rebuild_vectors_for_file(session, task_id, file_id)
+            await _rebuild_wiki_for_task(session, task_id)
             job = await session.get(IndexJob, job_id)
             if job is not None:
                 job.status = "ready"
