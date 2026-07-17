@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -268,6 +269,68 @@ async def test_retry_checklist_calls_scheduler_and_returns_accepted(
 
 
 @pytest.mark.asyncio
+async def test_retry_checklist_generates_report_end_to_end(client, tmp_path):
+    from app.services import scheduler
+
+    await _create_source(tmp_path, status="failed")
+    async with db.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, "T-CHECKLIST-API")
+        task.error_message = "checklist_generation_failed"
+        task.finished_at = task.updated_at
+        await session.commit()
+
+    response = await client.post("/api/tasks/T-CHECKLIST-API/checklist/retry")
+
+    assert response.status_code == 202
+    for _ in range(100):
+        report = await client.get("/api/tasks/T-CHECKLIST-API/checklist")
+        if report.status_code == 200:
+            break
+        await asyncio.sleep(0.01)
+    assert report.status_code == 200
+    await asyncio.wait_for(
+        scheduler._get_control("T-CHECKLIST-API").done_event.wait(),
+        timeout=5,
+    )
+    async with db.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, "T-CHECKLIST-API")
+    assert task.current_checklist_generation_id is not None
+    assert task.status == "diagnosing"
+    assert task.error_message is None
+    assert task.finished_at is None
+
+
+@pytest.mark.asyncio
+async def test_retry_checklist_agent_failure_marks_task_failed_safely(
+    client, tmp_path, monkeypatch
+):
+    from app.services import scheduler
+
+    class FailingChecklistAgent:
+        async def generate(self, *, task_id, context):
+            del task_id, context
+            raise RuntimeError("secret-token /Users/private/checklist.json")
+
+    await _create_source(tmp_path, status="failed")
+    monkeypatch.setattr(
+        scheduler,
+        "MockChecklistAgent",
+        FailingChecklistAgent,
+        raising=False,
+    )
+
+    response = await client.post("/api/tasks/T-CHECKLIST-API/checklist/retry")
+
+    assert response.status_code == 202
+    status = await scheduler.wait_for_terminal("T-CHECKLIST-API", timeout=5)
+    assert status == "failed"
+    async with db.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, "T-CHECKLIST-API")
+    assert task.current_checklist_generation_id is None
+    assert task.error_message == "checklist_generation_failed"
+
+
+@pytest.mark.asyncio
 async def test_scheduler_retry_prepares_state_and_starts_task(
     client, tmp_path, monkeypatch
 ):
@@ -280,21 +343,19 @@ async def test_scheduler_retry_prepares_state_and_starts_task(
         task.error_message = "checklist_generation_failed"
         task.finished_at = task.updated_at
         await session.commit()
-    calls = []
-
-    async def fake_start(task_id):
-        calls.append(task_id)
-
-    monkeypatch.setattr(scheduler, "start_task", fake_start)
 
     await scheduler.retry_checklist("T-CHECKLIST-API")
+    await asyncio.wait_for(
+        scheduler._get_control("T-CHECKLIST-API").done_event.wait(),
+        timeout=5,
+    )
 
     async with db.SessionLocal() as session:
         task = await session.get(DiagnosisTask, "T-CHECKLIST-API")
-    assert task.status == "generating_checklist"
+    assert task.status == "diagnosing"
+    assert task.current_checklist_generation_id is not None
     assert task.error_message is None
     assert task.finished_at is None
-    assert calls == ["T-CHECKLIST-API"]
 
 
 def test_result_out_defaults_new_fields_for_legacy_rows():

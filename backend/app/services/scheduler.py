@@ -3,14 +3,27 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 from app import db as database
-from app.config import MOCK_ITEM_DELAY_SECONDS, MOCK_INTERPRET_DELAY_SECONDS
+from app.config import (
+    MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS,
+    MOCK_INTERPRET_DELAY_SECONDS,
+)
+from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
+from app.engine.checklist_mock import MockChecklistAgent
 from app.engine.interpretation_mock import MockInterpretationAgent
-from app.engine.mock import MockEngine
+from app.engine.retrieval_mock import MockRetrievalProvider
 from app.models import DiagnosisResult, DiagnosisTask, WorkspaceFile, utcnow
 from app.services import interpret_report, report
+from app.services.checklist_service import (
+    ChecklistService,
+    ChecklistValidationError,
+    TenderParseBlockedError,
+    assert_batch_complete,
+    get_report,
+    wait_for_tender_parse_ready,
+)
 
 
 class SchedulerConflict(Exception):
@@ -18,7 +31,9 @@ class SchedulerConflict(Exception):
 
 
 TERMINAL_STATUSES = frozenset({"completed", "stopped", "failed"})
-STOPPABLE_STATUSES = frozenset({"interpreting", "diagnosing", "running", "paused"})
+STOPPABLE_STATUSES = frozenset(
+    {"interpreting", "generating_checklist", "diagnosing", "running", "paused"}
+)
 
 
 @dataclass
@@ -44,14 +59,7 @@ def _get_control(task_id: str) -> _TaskControl:
 
 
 async def reset_for_tests() -> None:
-    """Clear in-memory scheduler state between tests.
-
-    Awaits each cancelled background task (instead of merely calling
-    ``cancel()``) so it fully unwinds — including any in-flight DB session —
-    before the test's event loop is torn down. Leaving a cancelled-but-not-
-    yet-finished task dangling can otherwise deadlock ``asyncio.run()``'s
-    teardown when it tries to cancel/await the same task itself.
-    """
+    """Clear in-memory scheduler state between tests."""
     tasks = []
     for ctrl in list(_controls.values()):
         if ctrl.bg_task is not None and not ctrl.bg_task.done():
@@ -100,6 +108,10 @@ async def start_task(task_id: str) -> None:
 
 
 async def retry_checklist(task_id: str) -> DiagnosisTask:
+    ctrl = _get_control(task_id)
+    if ctrl.bg_task is not None and not ctrl.bg_task.done():
+        raise SchedulerConflict("task_runner_active")
+
     async with database.SessionLocal() as session:
         task = await session.get(DiagnosisTask, task_id)
         if task is None:
@@ -123,14 +135,65 @@ async def retry_checklist(task_id: str) -> DiagnosisTask:
 
         task.status = "generating_checklist"
         task.error_message = None
+        task.failure_stage = None
         task.finished_at = None
         task.updated_at = utcnow()
         await session.commit()
         await session.refresh(task)
         prepared = task
 
-    await start_task(task_id)
+    ctrl.stop_requested = False
+    ctrl.pause_event.set()
+    ctrl.done_event.clear()
+    ctrl.bg_task = asyncio.create_task(_run_checklist_retry(task_id))
     return prepared
+
+
+async def _run_checklist_retry(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    try:
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+        await ChecklistService(agent=MockChecklistAgent()).generate_for_task(task_id)
+
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None:
+                return
+            if task.current_checklist_generation_id is None:
+                raise RuntimeError("checklist_generation_missing")
+            task.status = "diagnosing"
+            task.error_message = None
+            task.failure_stage = None
+            task.finished_at = None
+            task.updated_at = utcnow()
+            await session.commit()
+    except asyncio.CancelledError:
+        raise
+    except ChecklistValidationError:
+        await _set_failure_stage(task_id, "checklist_validation")
+    except Exception:
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is not None and task.status not in TERMINAL_STATUSES:
+                task.status = "failed"
+                task.error_message = "checklist_generation_failed"
+                task.failure_stage = "checklist_generation"
+                task.finished_at = utcnow()
+                task.updated_at = utcnow()
+                await session.commit()
+            elif task is not None and task.failure_stage is None:
+                task.failure_stage = "checklist_generation"
+                task.updated_at = utcnow()
+                await session.commit()
+    finally:
+        ctrl.done_event.set()
 
 
 async def pause_task(task_id: str) -> DiagnosisTask:
@@ -187,7 +250,6 @@ async def stop_task(task_id: str) -> DiagnosisTask:
     ctrl.stop_requested = True
     ctrl.pause_event.set()
 
-    # Prefer letting the runner mark stopped; if idle, do it here.
     if ctrl.bg_task is None or ctrl.bg_task.done():
         async with database.SessionLocal() as session:
             task = await session.get(DiagnosisTask, task_id)
@@ -202,7 +264,6 @@ async def stop_task(task_id: str) -> DiagnosisTask:
             ctrl.done_event.set()
             return task
 
-    # Wait for the cooperative loop to observe the stop flag.
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 5.0
     while loop.time() < deadline:
@@ -255,6 +316,119 @@ async def _mark_stopped(task_id: str) -> None:
         await session.commit()
 
 
+async def _set_failure_stage(task_id: str, failure_stage: str) -> None:
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            return
+        task.failure_stage = failure_stage
+        task.updated_at = utcnow()
+        await session.commit()
+
+
+async def _mark_failed(
+    task_id: str,
+    error_message: str,
+    failure_stage: str,
+) -> None:
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            return
+        if task.status in TERMINAL_STATUSES:
+            return
+        task.status = "failed"
+        task.error_message = error_message
+        task.failure_stage = failure_stage
+        task.finished_at = utcnow()
+        task.updated_at = utcnow()
+        await session.commit()
+
+
+async def _run_diagnosis_phase(task_id: str) -> bool:
+    """Run category-batch diagnosis. Returns False if stopped."""
+    checklist_report = await get_report(task_id)
+    categories = checklist_report["categories"]
+
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            return False
+        if task.status in TERMINAL_STATUSES:
+            return False
+        items_done = task.progress_done
+        sort_order = items_done
+
+    retrieval = MockRetrievalProvider()
+    engine = MockBatchDiagnosisEngine(
+        delay_seconds=MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS
+    )
+
+    cumulative = 0
+    for category in categories:
+        category_items = category["items"]
+        category_count = len(category_items)
+        if cumulative + category_count <= items_done:
+            cumulative += category_count
+            continue
+
+        await _wait_if_paused(task_id)
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return False
+
+        retrieved_chunks = await retrieval.retrieve_for_category(
+            task_id=task_id,
+            category=category,
+            items=category_items,
+        )
+        batch_results = await engine.diagnose_category(
+            task_id=task_id,
+            category=category,
+            items=category_items,
+            retrieved_chunks=retrieved_chunks,
+        )
+        assert_batch_complete(category_items, batch_results)
+
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None:
+                return False
+            if task.status in TERMINAL_STATUSES:
+                return False
+
+            for item, batch_result in zip(category_items, batch_results):
+                session.add(
+                    DiagnosisResult(
+                        task_id=task_id,
+                        checklist_item_id=batch_result.checklist_item_id,
+                        content_title=item["title"],
+                        description=batch_result.description
+                        or item.get("requirement", ""),
+                        result=batch_result.compliance,
+                        compliance_status=batch_result.compliance,
+                        consequence_tags=json.dumps(
+                            batch_result.consequence_tags,
+                            ensure_ascii=False,
+                        ),
+                        evidence=batch_result.evidence,
+                        suggestion=batch_result.suggestion,
+                        sort_order=sort_order,
+                    )
+                )
+                sort_order += 1
+
+            task.progress_done = sort_order
+            task.updated_at = utcnow()
+            await session.commit()
+
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return False
+
+    return True
+
+
 async def _run(task_id: str) -> None:
     ctrl = _get_control(task_id)
     try:
@@ -271,15 +445,9 @@ async def _run(task_id: str) -> None:
                 task.updated_at = utcnow()
                 await session.commit()
 
-            snapshot: list[dict[str, Any]] = json.loads(task.config_snapshot or "[]")
-            start_idx = task.progress_done
-            if task.progress_total != len(snapshot):
-                task.progress_total = len(snapshot)
-                task.updated_at = utcnow()
-                await session.commit()
             tender_path = task.tender_path
-            bid_path = task.bid_path
             background = task.background or ""
+            need_checklist = task.current_checklist_generation_id is None
 
         if need_interpret:
             if _should_stop(task_id):
@@ -307,7 +475,7 @@ async def _run(task_id: str) -> None:
                     return
                 task.interpret_md_path = md_path
                 task.interpret_html_path = html_path
-                task.status = "diagnosing"
+                task.status = "generating_checklist"
                 task.updated_at = utcnow()
                 await session.commit()
 
@@ -315,46 +483,65 @@ async def _run(task_id: str) -> None:
                 await _mark_stopped(task_id)
                 return
 
-        engine = MockEngine(delay_seconds=MOCK_ITEM_DELAY_SECONDS)
-        documents = {"tender_path": tender_path, "bid_path": bid_path}
-
-        for idx, item in enumerate(snapshot):
-            if idx < start_idx:
-                continue
-
-            await _wait_if_paused(task_id)
-            if _should_stop(task_id):
-                await _mark_stopped(task_id)
-                return
-
-            result = await engine.diagnose_item(task_id, item, documents)
-
+        if need_checklist:
             async with database.SessionLocal() as session:
                 task = await session.get(DiagnosisTask, task_id)
                 if task is None:
                     return
                 if task.status in TERMINAL_STATUSES:
                     return
-
-                session.add(
-                    DiagnosisResult(
-                        task_id=task_id,
-                        config_id=result.config_id,
-                        content_title=result.content_title,
-                        description=result.description,
-                        result=result.result,
-                        evidence=result.evidence,
-                        suggestion=result.suggestion,
-                        sort_order=idx,
-                    )
-                )
-                task.progress_done = idx + 1
-                task.updated_at = utcnow()
-                await session.commit()
+                if task.status not in ("diagnosing", "paused"):
+                    task.status = "generating_checklist"
+                    task.updated_at = utcnow()
+                    await session.commit()
 
             if _should_stop(task_id):
                 await _mark_stopped(task_id)
                 return
+
+            try:
+                await wait_for_tender_parse_ready(task_id)
+            except TenderParseBlockedError as exc:
+                await _mark_failed(task_id, str(exc), "tender_parse")
+                return
+
+            if _should_stop(task_id):
+                await _mark_stopped(task_id)
+                return
+
+            try:
+                await ChecklistService(agent=MockChecklistAgent()).generate_for_task(
+                    task_id
+                )
+            except ChecklistValidationError:
+                await _set_failure_stage(task_id, "checklist_validation")
+                return
+            except Exception:
+                async with database.SessionLocal() as session:
+                    task = await session.get(DiagnosisTask, task_id)
+                    if task is not None and task.failure_stage is None:
+                        task.failure_stage = "checklist_generation"
+                        task.updated_at = utcnow()
+                        await session.commit()
+                return
+
+            if _should_stop(task_id):
+                await _mark_stopped(task_id)
+                return
+
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None:
+                return
+            if task.status in TERMINAL_STATUSES:
+                return
+            if task.status != "paused":
+                task.status = "diagnosing"
+                task.updated_at = utcnow()
+                await session.commit()
+
+        if not await _run_diagnosis_phase(task_id):
+            return
 
         if _should_stop(task_id):
             await _mark_stopped(task_id)

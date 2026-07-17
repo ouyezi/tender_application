@@ -37,6 +37,7 @@ async def test_create_and_get_task(client):
     assert body["status"] in (
         "running",
         "interpreting",
+        "generating_checklist",
         "diagnosing",
         "completed",
         "paused",

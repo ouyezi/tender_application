@@ -24,6 +24,7 @@ from app.models import (
     ChecklistGeneration,
     ChecklistItem,
     DiagnosisTask,
+    WorkspaceFile,
     utcnow,
 )
 from app.services.artifact import (
@@ -36,6 +37,7 @@ from app.services.artifact import (
     write_checklist_debug_json,
 )
 from app.services.checklist_context import (
+    ChecklistInputError,
     PromptContext,
     build_prompt_context,
     load_task_source,
@@ -115,6 +117,36 @@ class ChecklistTaskNotFound(LookupError):
 
 class ChecklistNotAvailable(LookupError):
     pass
+
+
+class TenderParseBlockedError(ChecklistInputError):
+    """Raised when tender parse failed, is partial, or timed out while waiting."""
+
+
+async def wait_for_tender_parse_ready(
+    task_id: str,
+    timeout: float = 300.0,
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        async with db.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None:
+                raise ChecklistInputError("task_missing")
+            if not task.tender_file_id:
+                raise ChecklistInputError("tender_parse_missing")
+            workspace_file = await session.get(WorkspaceFile, task.tender_file_id)
+            if workspace_file is None or workspace_file.task_id != task_id:
+                raise ChecklistInputError("tender_parse_missing")
+            parse_status = workspace_file.parse_status or "missing"
+            if parse_status == "succeeded":
+                return
+            if parse_status in ("failed", "partial"):
+                raise TenderParseBlockedError(f"tender_parse_{parse_status}")
+        if loop.time() >= deadline:
+            raise TenderParseBlockedError("tender_parse_timeout")
+        await asyncio.sleep(config.CHECKLIST_PARSE_POLL_SECONDS)
 
 
 def assert_batch_complete(

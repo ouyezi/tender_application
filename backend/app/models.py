@@ -53,6 +53,7 @@ class DiagnosisTask(Base):
         ForeignKey("checklist_generations.id"), nullable=True
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    failure_stage: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

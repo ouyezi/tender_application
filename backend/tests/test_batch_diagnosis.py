@@ -19,16 +19,16 @@ async def test_mock_retrieval_returns_chunks():
 async def test_batch_returns_exact_item_ids():
     engine = MockBatchDiagnosisEngine(delay_seconds=0)
     items = [
-        {"id": 1, "title": "A", "requirement": "r", "importance": "high"},
-        {"id": 2, "title": "B", "requirement": "r", "importance": "low"},
+        {"id": "item-1", "title": "A", "requirement": "r", "importance": "high"},
+        {"id": "item-2", "title": "B", "requirement": "r", "importance": "low"},
     ]
     results = await engine.diagnose_category(
         task_id="T-1",
-        category={"id": 1, "name": "资格"},
+        category={"id": "cat-1", "name": "资格"},
         items=items,
         retrieved_chunks=[],
     )
-    assert {r.checklist_item_id for r in results} == {1, 2}
+    assert {r.checklist_item_id for r in results} == {"item-1", "item-2"}
     assert all(
         r.compliance
         in {"satisfied", "violated", "cannot_satisfy", "insufficient_evidence"}
@@ -45,7 +45,7 @@ async def test_batch_rejects_incomplete_mapping():
 
     with pytest.raises(ValueError, match="mapping"):
         engine = BadEngine(delay_seconds=0)
-        items = [{"id": 1, "title": "A"}, {"id": 2, "title": "B"}]
+        items = [{"id": "item-1", "title": "A"}, {"id": "item-2", "title": "B"}]
         results = await engine.diagnose_category(
             task_id="T-1",
             category={"id": 1, "name": "x"},

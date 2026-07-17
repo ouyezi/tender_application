@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
@@ -13,16 +14,55 @@ from app.config import REPORT_DIR
 from app.models import DiagnosisResult
 from app.services import artifact
 
+COMPLIANCE_LABELS = {
+    "satisfied": "满足",
+    "violated": "违反",
+    "cannot_satisfy": "无法满足",
+    "insufficient_evidence": "证据不足",
+}
+
+CONSEQUENCE_LABELS = {
+    "no_score": "不得分",
+    "bid_unusable": "投标无效",
+    "score_risk": "得分风险",
+    "general_risk": "一般风险",
+}
+
+
+def _result_label(item: dict[str, Any]) -> str:
+    raw = item.get("compliance_status") or item.get("result", "")
+    if raw in COMPLIANCE_LABELS:
+        return COMPLIANCE_LABELS[raw]
+    return str(raw)
+
+
+def _format_consequence_tags(tags: Any) -> str:
+    if not tags:
+        return ""
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except json.JSONDecodeError:
+            return tags
+    if not isinstance(tags, list):
+        return str(tags)
+    labels = [
+        CONSEQUENCE_LABELS.get(tag, tag)
+        for tag in tags
+        if isinstance(tag, str) and tag
+    ]
+    return "、".join(labels)
+
 
 def build_markdown(task_id: str, results: list[dict]) -> str:
     total = len(results)
-    counts = Counter(r.get("result", "") for r in results)
+    counts = Counter(_result_label(item) for item in results)
     overview_parts = [f"总计 {total} 项"]
-    for label in ("通过", "风险", "缺失"):
+    for label in COMPLIANCE_LABELS.values():
         if counts.get(label):
             overview_parts.append(f"{label} {counts[label]} 项")
     for label, n in sorted(counts.items()):
-        if label and label not in ("通过", "风险", "缺失"):
+        if label and label not in COMPLIANCE_LABELS.values():
             overview_parts.append(f"{label} {n} 项")
 
     lines = [
@@ -40,12 +80,19 @@ def build_markdown(task_id: str, results: list[dict]) -> str:
 
     for i, item in enumerate(results, start=1):
         title = item.get("content_title") or f"检查项 {i}"
+        consequence_text = _format_consequence_tags(item.get("consequence_tags"))
         lines.extend(
             [
                 f"### {i}. {title}",
                 "",
                 f"- **描述：** {item.get('description', '')}",
-                f"- **结论：** {item.get('result', '')}",
+                f"- **结论：** {_result_label(item)}",
+            ]
+        )
+        if consequence_text:
+            lines.append(f"- **后果标签：** {consequence_text}")
+        lines.extend(
+            [
                 f"- **证据：** {item.get('evidence', '')}",
                 f"- **建议：** {item.get('suggestion', '')}",
                 "",
@@ -85,16 +132,23 @@ async def generate_and_save_reports(
         )
         rows = list(result.scalars().all())
 
-    results: list[dict[str, Any]] = [
-        {
-            "content_title": row.content_title,
-            "description": row.description,
-            "result": row.result,
-            "evidence": row.evidence,
-            "suggestion": row.suggestion,
-        }
-        for row in rows
-    ]
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            consequence_tags = json.loads(row.consequence_tags or "[]")
+        except json.JSONDecodeError:
+            consequence_tags = []
+        results.append(
+            {
+                "content_title": row.content_title,
+                "description": row.description,
+                "result": row.result,
+                "compliance_status": row.compliance_status,
+                "consequence_tags": consequence_tags,
+                "evidence": row.evidence,
+                "suggestion": row.suggestion,
+            }
+        )
 
     out_dir = Path(REPORT_DIR) / task_id
     out_dir.mkdir(parents=True, exist_ok=True)

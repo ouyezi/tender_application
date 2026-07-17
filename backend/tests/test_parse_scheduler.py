@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app import db as database
 from app.models import ParseJob, WorkspaceFile
 from app.services import artifact, parse_scheduler, workspace
+from app.services.parse.pipeline import run_parse_pipeline
 
 TERMINAL_PARSE_STATUSES = {"succeeded", "partial", "failed"}
 
@@ -66,6 +67,10 @@ async def _create_file_and_job(task_id: str, file_id: str, stored_path: str) -> 
 async def test_kick_runs_queued_job_end_to_end(tmp_path, monkeypatch, client):
     monkeypatch.setattr(artifact, "UPLOAD_DIR", tmp_path / "uploads")
     monkeypatch.setattr(workspace, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(
+        "app.services.parse_scheduler.run_parse_pipeline",
+        run_parse_pipeline,
+    )
 
     task_id = "T-PARSE-SCHED-001"
     file_id = "fsched001"
@@ -101,6 +106,10 @@ async def test_kick_runs_queued_job_end_to_end(tmp_path, monkeypatch, client):
 async def test_kick_marks_job_failed_on_unsupported_extension(tmp_path, monkeypatch, client):
     monkeypatch.setattr(artifact, "UPLOAD_DIR", tmp_path / "uploads")
     monkeypatch.setattr(workspace, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(
+        "app.services.parse_scheduler.run_parse_pipeline",
+        run_parse_pipeline,
+    )
 
     task_id = "T-PARSE-SCHED-002"
     file_id = "fsched002"

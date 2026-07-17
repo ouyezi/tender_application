@@ -138,7 +138,9 @@ class TaskListOut(BaseModel):
     report_docx_path: Optional[str]
     interpret_md_path: Optional[str]
     interpret_html_path: Optional[str]
+    current_checklist_generation_id: Optional[int] = None
     error_message: Optional[str]
+    failure_stage: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     finished_at: Optional[datetime]

@@ -105,7 +105,7 @@ class RetrievalProvider(Protocol):
 
 @dataclass
 class BatchItemResult:
-    checklist_item_id: int
+    checklist_item_id: str
     compliance: str  # satisfied | violated | cannot_satisfy | insufficient_evidence
     consequence_tags: list[str]
     evidence: str
