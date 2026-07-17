@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.models import Base, DiagnosisTask, KnowledgeChunk, IndexJob, WorkspaceFile
+from app.db import init_db_on_connection
+from app.models import DiagnosisTask, KnowledgeChunk, IndexJob, KnowledgeTag, WorkspaceFile
 from app.services import artifact, index_scheduler
 from app.services.parse.chunk import chunk_from_tree
 from app.services.parse.tree import build_document_tree
@@ -27,7 +28,18 @@ async def db_session(tmp_path, monkeypatch):
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(init_db_on_connection)
+
+    async with session_factory() as seed_session:
+        seed_session.add(
+            KnowledgeTag(
+                name="技术方案",
+                aliases=json.dumps(["架构设计"], ensure_ascii=False),
+                description="技术响应与方案",
+                enabled=1,
+            )
+        )
+        await seed_session.commit()
 
     monkeypatch.setattr("app.db.SessionLocal", session_factory)
     upload_dir = tmp_path / "uploads"
@@ -119,6 +131,19 @@ async def test_index_job_writes_fine_and_large(db_session, sample_parsed_workspa
         )
     ).scalar_one()
     assert job.status == "ready"
+    assert job.stage == "enrich"
+
+    enriched = [
+        c
+        for c in chunks
+        if c.summary and c.description and c.index_status == "ready"
+    ]
+    assert enriched, "expected at least one enriched knowledge chunk"
+
+    assert any(
+        any(tag.get("name") == "技术方案" for tag in json.loads(c.tags or "[]"))
+        for c in chunks
+    ), "expected controlled tag from catalog matching sample content"
 
 
 @pytest.mark.asyncio
