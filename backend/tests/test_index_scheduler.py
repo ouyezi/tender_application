@@ -13,6 +13,8 @@ from app.models import Base, DiagnosisTask, KnowledgeChunk, IndexJob, WorkspaceF
 from app.services import artifact, index_scheduler
 from app.services.parse.chunk import chunk_from_tree
 from app.services.parse.tree import build_document_tree
+from app.services.retrieval.persist import load_chunk_text, write_segments
+from app.services.retrieval.types import SegmentDraft
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -116,4 +118,114 @@ async def test_index_job_writes_fine_and_large(db_session, sample_parsed_workspa
             select(IndexJob).where(IndexJob.file_id == sample_parsed_workspace_file.id)
         )
     ).scalar_one()
-    assert job.status in {"ready", "partial"}
+    assert job.status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_index_job_fails_when_artifacts_missing(db_session, sample_parsed_workspace_file):
+    sample_parsed_workspace_file.chunks_path = None
+    await db_session.commit()
+
+    await index_scheduler.enqueue(
+        sample_parsed_workspace_file.task_id,
+        sample_parsed_workspace_file.id,
+    )
+    await index_scheduler.drain_once_for_tests()
+
+    job = (
+        await db_session.execute(
+            select(IndexJob).where(IndexJob.file_id == sample_parsed_workspace_file.id)
+        )
+    ).scalar_one()
+    assert job.status == "failed"
+    assert job.error_message == "parse_artifacts_missing"
+
+    chunks = (
+        await db_session.execute(
+            select(KnowledgeChunk).where(
+                KnowledgeChunk.file_id == sample_parsed_workspace_file.id
+            )
+        )
+    ).scalars().all()
+    assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_reindex_replaces_chunks_without_duplicating(db_session, sample_parsed_workspace_file):
+    for _ in range(2):
+        await index_scheduler.enqueue(
+            sample_parsed_workspace_file.task_id,
+            sample_parsed_workspace_file.id,
+        )
+        await index_scheduler.drain_once_for_tests()
+
+    chunks = (
+        await db_session.execute(
+            select(KnowledgeChunk).where(
+                KnowledgeChunk.file_id == sample_parsed_workspace_file.id
+            )
+        )
+    ).scalars().all()
+    chunk_ids = [c.chunk_id for c in chunks]
+    assert len(chunk_ids) == len(set(chunk_ids))
+    assert any(c.segment_level == "fine" for c in chunks)
+    assert any(c.segment_level == "large" for c in chunks)
+
+    jobs = (
+        await db_session.execute(
+            select(IndexJob)
+            .where(IndexJob.file_id == sample_parsed_workspace_file.id)
+            .order_by(IndexJob.id.asc())
+        )
+    ).scalars().all()
+    assert len(jobs) == 2
+    assert all(job.status == "ready" for job in jobs)
+
+
+@pytest.mark.asyncio
+async def test_load_chunk_text_inline_and_external(db_session, tmp_path, monkeypatch):
+    task_id = "T-INDEX-TEXT"
+    file_id = "findextext"
+    text_dir = tmp_path / "uploads" / task_id / "index_text"
+    inline_text = "短文本片段"
+    external_text = "x" * (8 * 1024 + 1)
+    segments = [
+        SegmentDraft(
+            chunk_id="inline_1",
+            node_id="n1",
+            parent_node_id=None,
+            ancestor_node_ids=[],
+            segment_level="fine",
+            title_path=["节"],
+            start=0,
+            end=len(inline_text),
+            text=inline_text,
+        ),
+        SegmentDraft(
+            chunk_id="external_1",
+            node_id="n2",
+            parent_node_id=None,
+            ancestor_node_ids=[],
+            segment_level="fine",
+            title_path=["节"],
+            start=0,
+            end=len(external_text),
+            text=external_text,
+        ),
+    ]
+
+    await write_segments(db_session, task_id, file_id, segments, text_dir)
+    await db_session.commit()
+
+    chunks = (
+        await db_session.execute(
+            select(KnowledgeChunk).where(KnowledgeChunk.file_id == file_id)
+        )
+    ).scalars().all()
+    by_id = {c.chunk_id: c for c in chunks}
+
+    assert load_chunk_text(by_id["inline_1"]) == inline_text
+    assert load_chunk_text(by_id["external_1"]) == external_text
+    assert by_id["inline_1"].text_inline == inline_text
+    assert by_id["external_1"].text_path is not None
+    assert Path(by_id["external_1"].text_path).is_file()

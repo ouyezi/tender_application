@@ -18,7 +18,12 @@ from sqlalchemy import select
 from app import db as database
 from app.config import UPLOAD_DIR
 from app.models import IndexJob, WorkspaceFile, utcnow
-from app.services.retrieval.persist import invalidate_file_index, write_segments
+from app.services.retrieval.persist import (
+    external_text_paths,
+    invalidate_file_index,
+    purge_orphaned_text_files,
+    write_segments,
+)
 from app.services.retrieval.segments import materialize_segments
 
 logger = logging.getLogger(__name__)
@@ -151,8 +156,9 @@ async def _run_job(job_id: int) -> None:
         segments = materialize_segments(markdown, tree, fine_chunks)
         text_dir = UPLOAD_DIR / task_id / "index_text"
 
+        new_text_paths = external_text_paths(segments, text_dir)
         async with database.SessionLocal() as session:
-            await invalidate_file_index(session, task_id, file_id)
+            old_text_paths = await invalidate_file_index(session, task_id, file_id)
             await write_segments(session, task_id, file_id, segments, text_dir)
             job = await session.get(IndexJob, job_id)
             if job is not None:
@@ -162,6 +168,7 @@ async def _run_job(job_id: int) -> None:
                 job.progress_total = len(segments)
                 job.finished_at = utcnow()
             await session.commit()
+        purge_orphaned_text_files(old_text_paths, new_text_paths)
     except Exception as exc:
         async with database.SessionLocal() as session:
             job = await session.get(IndexJob, job_id)

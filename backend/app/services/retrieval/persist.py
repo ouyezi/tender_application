@@ -12,12 +12,26 @@ from app.services.retrieval.types import SegmentDraft
 TEXT_INLINE_LIMIT_BYTES = 8 * 1024
 
 
+def purge_orphaned_text_files(
+    old_paths: list[Path],
+    new_paths: set[Path],
+) -> None:
+    """Delete on-disk text files superseded by a successful re-index."""
+    for path in old_paths:
+        if path not in new_paths and path.is_file():
+            path.unlink()
+
+
 async def invalidate_file_index(
     session: AsyncSession,
     task_id: str,
     file_id: str,
-) -> None:
-    """Remove persisted chunks (and wiki member refs) for one workspace file."""
+) -> list[Path]:
+    """Remove persisted chunks (and wiki member refs) for one workspace file.
+
+    Returns former ``text_path`` values so callers can delete the files only
+    after the replacement index commits successfully.
+    """
     result = await session.execute(
         select(KnowledgeChunk).where(
             KnowledgeChunk.task_id == task_id,
@@ -26,14 +40,12 @@ async def invalidate_file_index(
     )
     chunks = result.scalars().all()
     if not chunks:
-        return
+        return []
 
     chunk_ids = {chunk.chunk_id for chunk in chunks}
-    for chunk in chunks:
-        if chunk.text_path:
-            path = Path(chunk.text_path)
-            if path.is_file():
-                path.unlink()
+    old_text_paths = [
+        Path(chunk.text_path) for chunk in chunks if chunk.text_path
+    ]
 
     wiki_result = await session.execute(
         select(WikiPage).where(WikiPage.task_id == task_id)
@@ -50,6 +62,18 @@ async def invalidate_file_index(
             KnowledgeChunk.file_id == file_id,
         )
     )
+    return old_text_paths
+
+
+def external_text_paths(
+    segments: list[SegmentDraft],
+    text_dir: Path,
+) -> set[Path]:
+    return {
+        text_dir / f"{seg.chunk_id}.txt"
+        for seg in segments
+        if len(seg.text.encode("utf-8")) > TEXT_INLINE_LIMIT_BYTES
+    }
 
 
 async def write_segments(
