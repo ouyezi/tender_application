@@ -1,9 +1,9 @@
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.db import init_db_on_connection
-from app.models import DiagnosisResult, DiagnosisTask
+from app.db import DEFAULT_KNOWLEDGE_TAGS, init_db_on_connection
+from app.models import DiagnosisResult, DiagnosisTask, KnowledgeTag
 
 
 @pytest.mark.asyncio
@@ -156,4 +156,38 @@ async def test_migrate_adds_tender_file_id_to_legacy_tasks_table(tmp_path, monke
         }
         assert ("checklist_item_id",) in indexed_columns
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_knowledge_retrieval_tables_exist(tmp_path, monkeypatch):
+    db_path = tmp_path / "knowledge.db"
+    url = f"sqlite+aiosqlite:///{db_path}"
+    engine = create_async_engine(url, echo=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.db.engine", engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(init_db_on_connection)
+    async with engine.begin() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name IN ("
+                    "'knowledge_chunks', 'knowledge_tags', 'wiki_pages', 'index_jobs'"
+                    ")"
+                )
+            )
+        ).fetchall()
+        names = {r[0] for r in rows}
+        assert names == {
+            "knowledge_chunks",
+            "knowledge_tags",
+            "wiki_pages",
+            "index_jobs",
+        }
+    async with session_factory() as session:
+        tags = (await session.scalars(select(KnowledgeTag))).all()
+        tag_names = {t.name for t in tags}
+        assert tag_names == {name for name, _, _ in DEFAULT_KNOWLEDGE_TAGS}
     await engine.dispose()

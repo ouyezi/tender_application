@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+import json
 
 from sqlalchemy import inspect, text, update
 from sqlalchemy.dialects import sqlite
@@ -10,13 +11,25 @@ from app.models import (
     Base,
     ChecklistGeneration,
     DiagnosisTask,
+    IndexJob,
+    KnowledgeChunk,
+    KnowledgeTag,
     ParseJob,
+    WikiPage,
     WorkspaceFile,
     utcnow,
 )
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+DEFAULT_KNOWLEDGE_TAGS = [
+    ("授权证书", ["授权书", "授权函"], "投标授权类材料"),
+    ("资质证明", ["资质文件", "资质证书"], "企业/人员资质类材料"),
+    ("营业执照", [], "营业执照"),
+    ("售后政策", ["售后服务", "质保"], "售后与质保条款"),
+    ("退款政策", ["退款", "七天无理由", "7天无理由"], "退款与无理由退货"),
+]
 
 
 def _migrate_sqlite_columns(sync_conn) -> None:
@@ -60,10 +73,33 @@ def _migrate_sqlite_indexes(sync_conn) -> None:
             sync_conn.execute(CreateIndex(index, if_not_exists=True))
 
 
+def _seed_knowledge_tags_sync(sync_conn) -> None:
+    existing = {
+        row[0]
+        for row in sync_conn.execute(text("SELECT name FROM knowledge_tags")).fetchall()
+    }
+    for name, aliases, description in DEFAULT_KNOWLEDGE_TAGS:
+        if name in existing:
+            continue
+        sync_conn.execute(
+            text(
+                "INSERT INTO knowledge_tags (name, aliases, description, enabled) "
+                "VALUES (:name, :aliases, :description, 1)"
+            ),
+            {"name": name, "aliases": json.dumps(aliases), "description": description},
+        )
+
+
 def init_db_on_connection(sync_conn) -> None:
     Base.metadata.create_all(sync_conn)
     _migrate_sqlite_columns(sync_conn)
     _migrate_sqlite_indexes(sync_conn)
+    _seed_knowledge_tags_sync(sync_conn)
+
+
+async def seed_knowledge_tags() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(_seed_knowledge_tags_sync)
 
 
 async def init_db() -> None:

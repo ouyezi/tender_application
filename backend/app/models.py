@@ -188,3 +188,77 @@ class ParseJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class KnowledgeTag(Base):
+    __tablename__ = "knowledge_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    aliases: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON list
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    file_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    chunk_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    parent_node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    ancestor_node_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    segment_level: Mapped[str] = mapped_column(String(16), nullable=False)  # fine|large
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tags: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    title_path: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    end: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    text_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    text_inline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    child_chunk_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="native_text")
+    index_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    embedding_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class WikiPage(Base):
+    __tablename__ = "wiki_pages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tags: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    member_chunk_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class IndexJob(Base):
+    __tablename__ = "index_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    file_id: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    # queued|running|partial|ready|failed
+    stage: Mapped[str] = mapped_column(String(32), nullable=False, default="segments")
+    # segments|enrich|fts|vectors|wiki
+    progress_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
