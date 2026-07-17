@@ -61,6 +61,11 @@ class FailingAgent:
         raise RuntimeError("agent unavailable")
 
 
+class InvalidResponseAgent(StaticAgent):
+    def __init__(self, draft: ChecklistDraft):
+        super().__init__(replace(draft, raw_response={"invalid": {"set-value"}}))
+
+
 def valid_draft(tender_markdown: str) -> ChecklistDraft:
     source_text = "必须提交营业执照。"
     start = tender_markdown.index(source_text)
@@ -219,6 +224,44 @@ async def test_global_ids_do_not_conflict_between_generations(client, tmp_path):
         category.id for category in categories
     ]
     assert task.current_checklist_generation_id == second_id
+
+
+@pytest.mark.asyncio
+async def test_unserializable_raw_response_saves_fallback_then_fails_validation(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import (
+        ChecklistService,
+        ChecklistValidationError,
+    )
+
+    tender_markdown = await create_task_source(tmp_path)
+
+    with pytest.raises(
+        ChecklistValidationError,
+        match="raw_response must be JSON serializable",
+    ):
+        await ChecklistService(
+            InvalidResponseAgent(valid_draft(tender_markdown))
+        ).generate_for_task("task-checklist")
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+        categories = (await session.scalars(select(ChecklistCategory))).all()
+        items = (await session.scalars(select(ChecklistItem))).all()
+
+    raw_path = Path(generation.raw_response_path)
+    fallback = json.loads(raw_path.read_text(encoding="utf-8"))
+    assert fallback["serialization_error"]
+    assert "set-value" in fallback["safe_repr"]
+    assert generation.status == "failed"
+    assert "raw_response must be JSON serializable" in generation.error_message
+    assert task.status == "failed"
+    assert task.current_checklist_generation_id is None
+    assert categories == []
+    assert items == []
 
 
 def invalid_draft_cases(tender_markdown: str):

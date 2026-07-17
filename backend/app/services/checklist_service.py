@@ -234,6 +234,28 @@ def _global_id(prefix: str, generation_id: int, local_id: str) -> str:
     return f"{prefix}-{generation_id}-{digest}"
 
 
+def _safe_repr(value: Any, limit: int = 10_000) -> str:
+    try:
+        rendered = repr(value)
+    except Exception as exc:
+        rendered = f"<repr failed: {type(exc).__name__}: {exc}>"
+    if len(rendered) > limit:
+        return f"{rendered[:limit]}...<truncated>"
+    return rendered
+
+
+def _raw_artifact_payload(draft: ChecklistDraft) -> dict[str, Any]:
+    try:
+        payload = asdict(draft)
+        json.dumps(payload, ensure_ascii=False)
+    except Exception as exc:
+        return {
+            "serialization_error": f"{type(exc).__name__}: {exc}",
+            "safe_repr": _safe_repr(draft),
+        }
+    return payload
+
+
 def _build_published_payload(
     draft: ChecklistDraft,
     generation_id: int,
@@ -294,7 +316,7 @@ class ChecklistService:
             raw_path = write_checklist_json(
                 task_id,
                 f"checklist-generation-{generation_id}-raw.json",
-                asdict(draft),
+                _raw_artifact_payload(draft),
             )
             await self._save_raw_path(generation_id, raw_path.as_posix())
 
