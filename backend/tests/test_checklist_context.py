@@ -6,9 +6,24 @@ from app.models import DiagnosisTask, WorkspaceFile
 from app.services.checklist_context import (
     ChecklistInputError,
     build_prompt_context,
+    estimate_tokens,
     load_task_source,
     split_tender_markdown,
 )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", 0),
+        ("abcd", 1),
+        ("abcde", 2),
+        ("中文", 2),
+        ("中文abcdx", 4),
+    ],
+)
+def test_estimate_tokens_counts_cjk_and_ascii_predictably(text, expected):
+    assert estimate_tokens(text) == expected
 
 
 def test_short_document_returns_original_single_segment():
@@ -40,6 +55,18 @@ def test_long_document_builds_cache_friendly_calls_in_stable_order():
     assert tender not in prefix
 
 
+def test_multiple_atx_sections_split_at_heading_boundaries_first():
+    first = "# A\n" + "a" * 12 + "\n"
+    second = "# B\n" + "b" * 12 + "\n"
+    third = "# C\n" + "c" * 12 + "\n"
+    markdown = first + second + third
+
+    segments = split_tender_markdown(markdown, 1, 10, 0)
+
+    assert segments == [first + second, third]
+    assert all(estimate_tokens(segment) <= 10 for segment in segments)
+
+
 def test_single_oversized_section_is_split_with_overlap_without_losing_content():
     markdown = "# 超长章节\n" + "".join(chr(0x4E00 + index) for index in range(80))
 
@@ -48,6 +75,8 @@ def test_single_oversized_section_is_split_with_overlap_without_losing_content()
     assert len(segments) > 1
     for left, right in zip(segments, segments[1:]):
         assert left[-2:] == right[:2]
+        assert estimate_tokens(right[:2]) <= 2
+    assert all(estimate_tokens(segment) <= 8 for segment in segments)
     cursor = segments[0]
     for segment in segments[1:]:
         cursor += segment[2:]

@@ -28,8 +28,48 @@ class PromptContext:
 
 
 def estimate_tokens(text: str) -> int:
-    """Return a deterministic, dependency-free upper-bound approximation."""
-    return len(text)
+    """Estimate CJK as one token each and other text as four chars per token."""
+    cjk_count = sum(1 for char in text if _is_cjk(char))
+    other_count = len(text) - cjk_count
+    return cjk_count + (other_count + 3) // 4
+
+
+def _is_cjk(char: str) -> bool:
+    codepoint = ord(char)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or 0x20000 <= codepoint <= 0x2FA1F
+        or 0x3040 <= codepoint <= 0x30FF
+        or 0xAC00 <= codepoint <= 0xD7AF
+    )
+
+
+def _max_prefix_end(text: str, start: int, token_budget: int) -> int:
+    """Return the furthest end whose slice from start fits the token budget."""
+    low = start
+    high = min(len(text), start + token_budget * 4) + 1
+    while low + 1 < high:
+        middle = (low + high) // 2
+        if estimate_tokens(text[start:middle]) <= token_budget:
+            low = middle
+        else:
+            high = middle
+    return low
+
+
+def _max_suffix_start(text: str, end: int, token_budget: int) -> int:
+    """Return the earliest start whose slice to end fits the token budget."""
+    low = max(0, end - token_budget * 4)
+    high = end
+    while low < high:
+        middle = (low + high) // 2
+        if estimate_tokens(text[middle:end]) <= token_budget:
+            high = middle
+        else:
+            low = middle + 1
+    return low
 
 
 def _validate_split_parameters(
@@ -65,7 +105,7 @@ def split_tender_markdown(
     frontier = 0
     text_length = len(markdown)
     while frontier < text_length:
-        limit = min(start + chunk_tokens, text_length)
+        limit = _max_prefix_end(markdown, start, chunk_tokens)
         section_ends = [
             offset for offset in heading_offsets if frontier < offset <= limit
         ]
@@ -74,7 +114,7 @@ def split_tender_markdown(
         frontier = end
         if frontier == text_length:
             break
-        start = max(0, frontier - overlap_tokens)
+        start = _max_suffix_start(markdown, frontier, overlap_tokens)
     return segments
 
 
