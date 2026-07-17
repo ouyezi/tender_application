@@ -974,6 +974,54 @@ async def test_process_interrupt_preserves_staged_for_publication_recovery(
 
 
 @pytest.mark.asyncio
+async def test_interrupt_after_publish_commit_preserves_staged_for_recovery(
+    client, tmp_path, monkeypatch
+):
+    del client
+    from app.services.checklist_service import ChecklistService
+
+    tender_markdown = await create_task_source(tmp_path)
+    original_publish = ChecklistService._publish
+
+    async def publish_then_interrupt(self, *args, **kwargs):
+        await original_publish(self, *args, **kwargs)
+        raise KeyboardInterrupt("interrupt after database commit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ChecklistService, "_publish", publish_then_interrupt)
+        with pytest.raises(KeyboardInterrupt, match="after database commit"):
+            await ChecklistService(
+                StaticAgent(valid_draft(tender_markdown))
+            ).generate_for_task("task-checklist")
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+
+    filename = f"checklist-generation-{generation.id}.json"
+    staged_path = artifact.staged_checklist_path(
+        "task-checklist",
+        filename,
+    )
+    final_path = artifact.checklist_json_path(
+        "task-checklist",
+        filename,
+    )
+    assert generation.status == "succeeded"
+    assert task.current_checklist_generation_id == generation.id
+    assert staged_path.is_file()
+    assert not final_path.exists()
+
+    from app.services.checklist_service import recover_checklist_publications
+
+    await recover_checklist_publications()
+
+    assert final_path.is_file()
+    assert not staged_path.exists()
+    assert json.loads(final_path.read_text(encoding="utf-8"))["items"]
+
+
+@pytest.mark.asyncio
 async def test_recovery_ignores_failed_and_noncurrent_staged_files(
     client, tmp_path
 ):
@@ -1013,8 +1061,8 @@ async def test_recovery_ignores_failed_and_noncurrent_staged_files(
 
     await recover_checklist_publications()
 
-    assert failed_staged.is_file()
-    assert noncurrent_staged.is_file()
+    assert not failed_staged.exists()
+    assert not noncurrent_staged.exists()
     assert not artifact.checklist_json_path(
         "failed-task",
         f"checklist-generation-{failed.id}.json",

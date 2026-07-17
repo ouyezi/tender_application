@@ -406,11 +406,6 @@ async def recover_checklist_publications() -> None:
                     DiagnosisTask,
                     ChecklistGeneration.task_id == DiagnosisTask.id,
                 )
-                .where(
-                    ChecklistGeneration.status == "succeeded",
-                    DiagnosisTask.current_checklist_generation_id
-                    == ChecklistGeneration.id,
-                )
             )
         ).all()
 
@@ -418,6 +413,13 @@ async def recover_checklist_publications() -> None:
         filename = f"checklist-generation-{generation.id}.json"
         final_path = checklist_json_path(task.id, filename)
         staged_path = staged_checklist_path(task.id, filename)
+        is_current_success = (
+            generation.status == "succeeded"
+            and task.current_checklist_generation_id == generation.id
+        )
+        if not is_current_success:
+            remove_staged_checklist(staged_path)
+            continue
         if final_path.exists():
             remove_staged_checklist(staged_path)
         elif staged_path.exists():
@@ -449,8 +451,6 @@ class ChecklistService:
     async def _generate_locked(self, task_id: str) -> int:
         generation_id: int | None = None
         staged_path = None
-        db_published = False
-        promotion_done = False
         try:
             _, tender_markdown, interpret_markdown, admin_configs = (
                 await load_task_source(task_id)
@@ -500,49 +500,44 @@ class ChecklistService:
                 payload,
             )
             final_path = checklist_json_path(task_id, formal_filename)
+            await self._publish(
+                task_id,
+                generation_id,
+                draft,
+                category_map,
+                item_map,
+            )
             try:
-                await self._publish(
+                promote_staged_checklist_json(
                     task_id,
-                    generation_id,
-                    draft,
-                    category_map,
-                    item_map,
+                    staged_path,
+                    formal_filename,
                 )
-                db_published = True
+            except Exception as exc:
+                logger.exception(
+                    "Checklist artifact promotion failed for task %s",
+                    task_id,
+                )
+                compensated = False
                 try:
-                    promote_staged_checklist_json(
-                        task_id,
-                        staged_path,
-                        formal_filename,
+                    await asyncio.shield(
+                        self._compensate_publish(task_id, generation_id)
                     )
-                    promotion_done = True
-                except Exception as exc:
+                    compensated = True
+                except Exception:
                     logger.exception(
-                        "Checklist artifact promotion failed for task %s",
+                        "Checklist publish compensation failed for task %s",
                         task_id,
                     )
-                    try:
-                        await asyncio.shield(
-                            self._compensate_publish(task_id, generation_id)
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Checklist publish compensation failed for task %s",
-                            task_id,
-                        )
-                    finally:
-                        final_path.unlink(missing_ok=True)
-                    db_published = False
-                    raise RuntimeError(
-                        "checklist_artifact_publish_failed"
-                    ) from exc
-            finally:
-                if not db_published or promotion_done:
+                finally:
+                    final_path.unlink(missing_ok=True)
+                if compensated:
                     remove_staged_checklist(staged_path)
+                raise RuntimeError(
+                    "checklist_artifact_publish_failed"
+                ) from exc
             return generation_id
         except asyncio.CancelledError as cancelled_error:
-            if db_published and not promotion_done:
-                raise cancelled_error
             cleanup_task = asyncio.create_task(
                 self._fail(
                     task_id,
@@ -557,10 +552,15 @@ class ChecklistService:
                     "Checklist cancellation cleanup failed for task %s",
                     task_id,
                 )
+            else:
+                if staged_path is not None:
+                    remove_staged_checklist(staged_path)
             raise cancelled_error
         except Exception as exc:
             logger.exception("Checklist generation failed for task %s", task_id)
             await self._fail(task_id, generation_id, error=exc)
+            if staged_path is not None:
+                remove_staged_checklist(staged_path)
             raise
 
     async def _create_attempt(
