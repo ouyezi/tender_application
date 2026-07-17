@@ -191,3 +191,52 @@ async def test_knowledge_retrieval_tables_exist(tmp_path, monkeypatch):
         tag_names = {t.name for t in tags}
         assert tag_names == {name for name, _, _ in DEFAULT_KNOWLEDGE_TAGS}
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_migrate_adds_checklist_content_source_columns(tmp_path, monkeypatch):
+    db_path = tmp_path / "checklist_content.db"
+    url = f"sqlite+aiosqlite:///{db_path}"
+    engine = create_async_engine(url, echo=False)
+
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE checklist_items (
+                    id VARCHAR(64) NOT NULL PRIMARY KEY,
+                    generation_id INTEGER NOT NULL,
+                    category_id VARCHAR(64) NOT NULL,
+                    title VARCHAR(200) NOT NULL,
+                    requirement TEXT NOT NULL,
+                    technique TEXT NOT NULL,
+                    importance VARCHAR(16) NOT NULL,
+                    source_references TEXT NOT NULL,
+                    retrieval_hints TEXT NOT NULL,
+                    expected_evidence TEXT NOT NULL,
+                    compliance_rules TEXT NOT NULL,
+                    consequence_rules TEXT NOT NULL,
+                    admin_config_refs TEXT NOT NULL DEFAULT '[]',
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME
+                )
+                """
+            )
+        )
+
+    monkeypatch.setattr("app.db.engine", engine)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(init_db_on_connection)
+
+    async with engine.begin() as conn:
+        columns = {
+            row[1]
+            for row in (
+                await conn.execute(text("PRAGMA table_info('checklist_items')"))
+            ).fetchall()
+        }
+        assert "content_source" in columns
+        assert "content_target" in columns
+
+    await engine.dispose()

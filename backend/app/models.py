@@ -122,6 +122,12 @@ class ChecklistItem(Base):
     compliance_rules: Mapped[str] = mapped_column(Text, nullable=False)
     consequence_rules: Mapped[str] = mapped_column(Text, nullable=False)
     admin_config_refs: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    content_source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="precise_search", server_default="precise_search"
+    )
+    content_target: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}", server_default="{}"
+    )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow

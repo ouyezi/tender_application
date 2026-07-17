@@ -259,13 +259,32 @@ class MockChecklistAgent:
         return "综合响应材料"
 
     @staticmethod
+    def _infer_content_fields(title: str, requirement: str) -> tuple[str, dict[str, Any]]:
+        text = f"{title} {requirement}"
+        if "全文" in text and "招标" in text:
+            return "full_document", {"file_role": "tender"}
+        if "标书全文" in text:
+            return "large_segments", {"file_role": "bid"}
+        if "授权" in text or "资质" in text:
+            tags: list[str] = []
+            if "授权" in text:
+                tags.append("授权证书")
+            if "资质" in text:
+                tags.append("资质证明")
+            return "collection", {"target_tags": tags or ["资质证明"]}
+        query = (requirement or title).strip()
+        return "precise_search", {"query": query}
+
+    @classmethod
     def _build_item(
+        cls,
         candidate: _Candidate,
         index: int,
         category_id: str,
     ) -> ChecklistItemDraft:
         title = candidate.title
         requirement = candidate.requirement
+        content_source, content_target = cls._infer_content_fields(title, requirement)
         source_reference: dict[str, Any] = {
             "section": candidate.section,
             "start": candidate.start,
@@ -295,5 +314,7 @@ class MockChecklistAgent:
                 "general_risk": "缺失或不符合要求可能导致合规风险。"
             },
             admin_config_refs=[],
+            content_source=content_source,
+            content_target=content_target,
             sort_order=index,
         )

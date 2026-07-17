@@ -163,6 +163,8 @@ async def test_persist_task_checklist_and_structured_result(tmp_path):
         assert fetched_item.compliance_rules == '["证照在有效期内"]'
         assert fetched_item.consequence_rules == '["无效时标记重大风险"]'
         assert fetched_item.admin_config_refs == "[]"
+        assert fetched_item.content_source == "precise_search"
+        assert fetched_item.content_target == "{}"
         assert fetched_item.sort_order == 0
         assert fetched_item.created_at is not None
 

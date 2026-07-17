@@ -87,6 +87,8 @@ class ChecklistItemOut(BaseModel):
     compliance_rules: dict[str, str]
     consequence_rules: dict[str, str]
     admin_config_refs: List[int]
+    content_source: str = "precise_search"
+    content_target: dict = {}
     sort_order: int
 
 

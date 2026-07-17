@@ -228,3 +228,40 @@ async def test_raw_response_is_json_serializable_and_contains_generated_data():
     assert draft.raw_response["schema_version"] == "1"
     assert draft.raw_response["categories"]
     assert draft.raw_response["items"]
+
+
+@pytest.mark.asyncio
+async def test_mock_agent_infers_content_source_heuristics():
+    agent = MockChecklistAgent()
+
+    full_doc = await agent.generate(
+        task_id="TASK-CS-1",
+        context=_context("# 招标文件全文\n须完整阅读招标全文要求。"),
+    )
+    full_item = next(i for i in full_doc.items if "全文" in i.title or "全文" in i.requirement)
+    assert full_item.content_source == "full_document"
+    assert full_item.content_target == {"file_role": "tender"}
+
+    qual = await agent.generate(
+        task_id="TASK-CS-2",
+        context=_context("# 授权书\n投标人须提供有效授权证书。"),
+    )
+    qual_item = qual.items[0]
+    assert qual_item.content_source == "collection"
+    assert "授权证书" in qual_item.content_target.get("target_tags", [])
+
+    bid = await agent.generate(
+        task_id="TASK-CS-3",
+        context=_context("# 标书全文\n须提交标书全文响应。"),
+    )
+    bid_item = bid.items[0]
+    assert bid_item.content_source == "large_segments"
+    assert bid_item.content_target == {"file_role": "bid"}
+
+    precise = await agent.generate(
+        task_id="TASK-CS-4",
+        context=_context("# 技术参数\n须提供参数响应表。"),
+    )
+    tech_item = next(i for i in precise.items if "技术" in i.title or "参数" in i.requirement)
+    assert tech_item.content_source == "precise_search"
+    assert tech_item.content_target.get("query")

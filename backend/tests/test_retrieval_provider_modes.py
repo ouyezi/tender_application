@@ -11,7 +11,7 @@ from sqlalchemy.pool import NullPool
 
 from app.db import init_db_on_connection
 from app.engine.retrieval_workspace import WorkspaceRetrievalProvider
-from app.models import DiagnosisTask, KnowledgeChunk, KnowledgeTag, WorkspaceFile
+from app.models import DiagnosisTask, IndexJob, KnowledgeChunk, KnowledgeTag, WorkspaceFile
 from app.services.retrieval.persist import load_chunk_text
 from app.services.retrieval.provider import _expand_fine_to_large
 from app.services.retrieval.segments import materialize_segments
@@ -384,3 +384,29 @@ async def test_retrieve_for_category_dedupes_by_chunk_id(
     assert len(chunk_ids) == len(set(chunk_ids))
     assert chunks
     assert all(c.location for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_partial_index_status_allows_collection_hits(
+    provider, db_session, indexed_task_with_tagged_chunks
+):
+    task_id = indexed_task_with_tagged_chunks
+    db_session.add(
+        IndexJob(
+            task_id=task_id,
+            file_id="pending-file",
+            status="running",
+            stage="vectors",
+        )
+    )
+    await db_session.commit()
+
+    result = await provider.retrieve(
+        task_id=task_id,
+        content_source="collection",
+        content_target={"target_tags": ["授权证书"]},
+    )
+    assert result.index_status == "partial"
+    assert result.incomplete is True
+    assert result.error is None
+    assert result.items

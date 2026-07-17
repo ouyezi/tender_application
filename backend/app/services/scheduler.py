@@ -9,11 +9,13 @@ from app import db as database
 from app.config import (
     MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS,
     MOCK_INTERPRET_DELAY_SECONDS,
+    RETRIEVAL_PROVIDER,
 )
 from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
 from app.engine.checklist_mock import MockChecklistAgent
 from app.engine.interpretation_mock import MockInterpretationAgent
 from app.engine.retrieval_mock import MockRetrievalProvider
+from app.engine.retrieval_workspace import WorkspaceRetrievalProvider
 from app.models import DiagnosisResult, DiagnosisTask, WorkspaceFile, utcnow
 from app.services import interpret_report, report
 from app.services.checklist_service import (
@@ -30,6 +32,12 @@ from app.services.checklist_context import ChecklistInputError
 
 class SchedulerConflict(Exception):
     """Raised when pause/resume/stop is invalid for the current task status."""
+
+
+def build_retrieval_provider():
+    if RETRIEVAL_PROVIDER == "workspace":
+        return WorkspaceRetrievalProvider()
+    return MockRetrievalProvider()
 
 
 TERMINAL_STATUSES = frozenset({"completed", "stopped", "failed"})
@@ -396,7 +404,7 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
         items_done = task.progress_done
         sort_order = items_done
 
-    retrieval = MockRetrievalProvider()
+    retrieval = build_retrieval_provider()
     engine = MockBatchDiagnosisEngine(
         delay_seconds=MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS
     )

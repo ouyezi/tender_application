@@ -2,6 +2,8 @@ import pytest
 
 from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
 from app.engine.retrieval_mock import MockRetrievalProvider
+from app.engine.retrieval_workspace import WorkspaceRetrievalProvider
+from app.services.scheduler import build_retrieval_provider
 
 
 @pytest.mark.asyncio
@@ -55,3 +57,13 @@ async def test_batch_rejects_incomplete_mapping():
         from app.services.checklist_service import assert_batch_complete
 
         assert_batch_complete(items, results)
+
+
+def test_build_retrieval_provider_defaults_to_workspace(monkeypatch):
+    monkeypatch.setattr("app.services.scheduler.RETRIEVAL_PROVIDER", "workspace")
+    assert isinstance(build_retrieval_provider(), WorkspaceRetrievalProvider)
+
+
+def test_build_retrieval_provider_mock_when_configured(monkeypatch):
+    monkeypatch.setattr("app.services.scheduler.RETRIEVAL_PROVIDER", "mock")
+    assert isinstance(build_retrieval_provider(), MockRetrievalProvider)

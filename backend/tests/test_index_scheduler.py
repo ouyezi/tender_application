@@ -131,7 +131,7 @@ async def test_index_job_writes_fine_and_large(db_session, sample_parsed_workspa
         )
     ).scalar_one()
     assert job.status == "ready"
-    assert job.stage == "enrich"
+    assert job.stage == "wiki"
 
     enriched = [
         c

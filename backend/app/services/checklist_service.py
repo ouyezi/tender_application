@@ -56,6 +56,12 @@ _CONSEQUENCE_KEYS = {
     "score_risk",
     "general_risk",
 }
+_CONTENT_SOURCE_VALUES = {
+    "full_document",
+    "collection",
+    "large_segments",
+    "precise_search",
+}
 _MAX_PUBLIC_ERROR_LENGTH = 240
 logger = logging.getLogger(__name__)
 
@@ -210,6 +216,37 @@ def _load_json_rules(raw: str) -> dict[str, str]:
     return value
 
 
+def _load_json_object(raw: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ChecklistValidationError("stored checklist JSON is invalid") from exc
+    if not isinstance(value, dict):
+        raise ChecklistValidationError("stored checklist JSON is invalid")
+    return value
+
+
+def _validate_content_target(content_source: str, content_target: dict[str, Any], item_id: str) -> None:
+    if not isinstance(content_target, dict):
+        raise ChecklistValidationError(f"item {item_id} content_target must be a dict")
+    if content_source == "collection":
+        tags = content_target.get("target_tags")
+        if not isinstance(tags, list) or not tags or not all(isinstance(t, str) for t in tags):
+            raise ChecklistValidationError(
+                f"item {item_id} collection requires non-empty target_tags"
+            )
+    elif content_source == "precise_search":
+        query = content_target.get("query")
+        if query is not None and not isinstance(query, str):
+            raise ChecklistValidationError(f"item {item_id} precise_search query must be str")
+    elif content_source in {"full_document", "large_segments"}:
+        file_role = content_target.get("file_role")
+        if file_role is not None and file_role not in {"tender", "bid"}:
+            raise ChecklistValidationError(
+                f"item {item_id} file_role must be tender or bid"
+            )
+
+
 async def get_report(task_id: str) -> dict[str, Any]:
     async with db.SessionLocal() as session:
         task = await session.get(DiagnosisTask, task_id)
@@ -279,6 +316,8 @@ async def get_report(task_id: str) -> dict[str, Any]:
                     item.admin_config_refs,
                     entries=int,
                 ),
+                "content_source": item.content_source,
+                "content_target": _load_json_object(item.content_target),
                 "sort_order": item.sort_order,
             }
         )
@@ -538,6 +577,13 @@ def validate_draft(
             "item consequence_rules",
             _CONSEQUENCE_KEYS,
         )
+        content_source = item.content_source or "precise_search"
+        if content_source not in _CONTENT_SOURCE_VALUES:
+            raise ChecklistValidationError(
+                f"item {item.id} content_source is invalid"
+            )
+        content_target = item.content_target if isinstance(item.content_target, dict) else {}
+        _validate_content_target(content_source, content_target, item.id)
 
     if not isinstance(draft.raw_response, dict):
         raise ChecklistValidationError("raw_response must be a dict")
@@ -878,6 +924,11 @@ class ChecklistService:
                                 sort_keys=True,
                             ),
                             admin_config_refs=json.dumps(item.admin_config_refs),
+                            content_source=item.content_source or "precise_search",
+                            content_target=json.dumps(
+                                item.content_target or {},
+                                ensure_ascii=False,
+                            ),
                             sort_order=item.sort_order,
                         )
                         for item in draft.items

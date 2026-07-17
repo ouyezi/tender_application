@@ -219,14 +219,21 @@ async def _run_job(job_id: int) -> None:
             old_text_paths = await invalidate_file_index(session, task_id, file_id)
             await write_segments(session, task_id, file_id, segments, text_dir)
             await rebuild_fts_for_file(session, task_id, file_id)
+            job = await session.get(IndexJob, job_id)
+            if job is not None:
+                job.status = "partial"
+                job.stage = "fts"
+                job.progress_done = len(segments)
+                job.progress_total = len(segments)
+            await session.commit()
+
+        async with database.SessionLocal() as session:
             await _rebuild_vectors_for_file(session, task_id, file_id)
             await _rebuild_wiki_for_task(session, task_id)
             job = await session.get(IndexJob, job_id)
             if job is not None:
                 job.status = "ready"
-                job.stage = "enrich"
-                job.progress_done = len(segments)
-                job.progress_total = len(segments)
+                job.stage = "wiki"
                 job.finished_at = utcnow()
             await session.commit()
         purge_orphaned_text_files(old_text_paths, new_text_paths)

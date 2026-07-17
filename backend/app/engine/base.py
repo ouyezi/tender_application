@@ -67,6 +67,8 @@ class ChecklistItemDraft:
     consequence_rules: dict[str, str]
     admin_config_refs: list[int]
     sort_order: int
+    content_source: str = "precise_search"
+    content_target: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
