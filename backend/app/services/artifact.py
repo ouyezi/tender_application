@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
-from app.config import UPLOAD_DIR
+from app.config import REPORT_DIR, UPLOAD_DIR
 
 ARTIFACT_SUBDIRS = ("document", "markdown", "image", "table", "json", "report", "other")
 
@@ -25,6 +28,129 @@ def ensure_artifact_dirs(task_id: str) -> Path:
 def _safe_name(name: str) -> str:
     base = Path(name).name
     return re.sub(r"[^\w.\u4e00-\u9fff\-]+", "_", base)[:180] or "file"
+
+
+def serialize_checklist_json(payload: dict[str, Any]) -> bytes:
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+        allow_nan=False,
+    )
+    return serialized.encode("utf-8")
+
+
+def _fsync_directory(directory: Path) -> None:
+    try:
+        descriptor = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_write_json(
+    directory: Path,
+    filename: str,
+    payload: dict[str, Any],
+) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / _safe_name(filename)
+    serialized = serialize_checklist_json(payload)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(serialized)
+            temporary.write(b"\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        temporary_path.replace(destination)
+        _fsync_directory(destination.parent)
+        return destination
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
+def write_checklist_json(
+    task_id: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> Path:
+    return _atomic_write_json(
+        ensure_artifact_dirs(task_id) / "json",
+        filename,
+        payload,
+    )
+
+
+def write_checklist_debug_json(
+    task_id: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> Path:
+    return _atomic_write_json(
+        REPORT_DIR / _safe_name(task_id) / "debug",
+        filename,
+        payload,
+    )
+
+
+def stage_checklist_json(
+    task_id: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> Path:
+    destination = staged_checklist_path(task_id, filename)
+    return _atomic_write_json(
+        destination.parent,
+        destination.name,
+        payload,
+    )
+
+
+def checklist_json_path(task_id: str, filename: str) -> Path:
+    return ensure_artifact_dirs(task_id) / "json" / _safe_name(filename)
+
+
+def staged_checklist_path(task_id: str, filename: str) -> Path:
+    directory = REPORT_DIR / _safe_name(task_id) / "staging"
+    return directory / f".{_safe_name(filename)}.staged"
+
+
+def remove_staged_checklist(staged_path: Path) -> None:
+    staged_path = Path(staged_path)
+    if staged_path.exists():
+        staged_path.unlink()
+        _fsync_directory(staged_path.parent)
+
+
+def promote_staged_checklist_json(
+    task_id: str,
+    staged_path: Path,
+    filename: str,
+) -> Path:
+    expected_staged_path = staged_checklist_path(task_id, filename)
+    staged_path = Path(staged_path)
+    if staged_path.resolve() != expected_staged_path.resolve():
+        raise ValueError("staged checklist path is outside private staging directory")
+    destination = checklist_json_path(task_id, filename)
+    os.replace(staged_path, destination)
+    _fsync_directory(expected_staged_path.parent)
+    _fsync_directory(destination.parent)
+    return destination
 
 
 def move_into_document(task_id: str, src: Path, *, file_id: str, original_name: str) -> Path:

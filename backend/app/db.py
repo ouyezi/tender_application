@@ -3,9 +3,17 @@ from collections.abc import AsyncGenerator
 from sqlalchemy import inspect, text, update
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.schema import CreateColumn, CreateIndex
 
 from app.config import DATABASE_URL
-from app.models import Base, DiagnosisTask, ParseJob, WorkspaceFile, utcnow
+from app.models import (
+    Base,
+    ChecklistGeneration,
+    DiagnosisTask,
+    ParseJob,
+    WorkspaceFile,
+    utcnow,
+)
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -19,7 +27,7 @@ def _migrate_sqlite_columns(sync_conn) -> None:
     """
     inspector = inspect(sync_conn)
     dialect = sqlite.dialect()
-    for table in Base.metadata.sorted_tables:
+    for table in Base.metadata.tables.values():
         if not inspector.has_table(table.name):
             continue
         existing = {col["name"] for col in inspector.get_columns(table.name)}
@@ -29,13 +37,33 @@ def _migrate_sqlite_columns(sync_conn) -> None:
             if not column.nullable and column.server_default is None:
                 # Avoid ADD COLUMN NOT NULL without a default on populated tables.
                 continue
-            col_type = column.type.compile(dialect=dialect)
-            sync_conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {col_type}"))
+            if column.server_default is not None:
+                column_ddl = CreateColumn(column).compile(dialect=dialect)
+            else:
+                column_ddl = f"{column.name} {column.type.compile(dialect=dialect)}"
+            sync_conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column_ddl}"))
+
+
+def _migrate_sqlite_indexes(sync_conn) -> None:
+    """Create non-unique metadata indexes missing from existing SQLite tables."""
+    inspector = inspect(sync_conn)
+    for table in Base.metadata.tables.values():
+        if not inspector.has_table(table.name):
+            continue
+        existing_columns = {
+            column["name"] for column in inspector.get_columns(table.name)
+        }
+        for index in table.indexes:
+            index_columns = {column.name for column in index.columns}
+            if index.unique or not index_columns.issubset(existing_columns):
+                continue
+            sync_conn.execute(CreateIndex(index, if_not_exists=True))
 
 
 def init_db_on_connection(sync_conn) -> None:
     Base.metadata.create_all(sync_conn)
     _migrate_sqlite_columns(sync_conn)
+    _migrate_sqlite_indexes(sync_conn)
 
 
 async def init_db() -> None:
@@ -50,14 +78,30 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def recover_interrupted_tasks() -> None:
     async with SessionLocal() as session:
+        now = utcnow()
         await session.execute(
             update(DiagnosisTask)
             .where(
                 DiagnosisTask.status.in_(
-                    ["interpreting", "diagnosing", "running", "paused"]
+                    [
+                        "interpreting",
+                        "generating_checklist",
+                        "diagnosing",
+                        "running",
+                        "paused",
+                    ]
                 )
             )
-            .values(status="stopped", updated_at=utcnow())
+            .values(status="stopped", updated_at=now)
+        )
+        await session.execute(
+            update(ChecklistGeneration)
+            .where(ChecklistGeneration.status == "generating")
+            .values(
+                status="failed",
+                error_message="interrupted",
+                finished_at=now,
+            )
         )
         await session.commit()
 

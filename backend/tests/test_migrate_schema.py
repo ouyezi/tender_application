@@ -3,7 +3,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import init_db_on_connection
-from app.models import DiagnosisTask
+from app.models import DiagnosisResult, DiagnosisTask
 
 
 @pytest.mark.asyncio
@@ -43,6 +43,37 @@ async def test_migrate_adds_tender_file_id_to_legacy_tasks_table(tmp_path, monke
         await conn.execute(
             text(
                 """
+                CREATE TABLE diagnosis_results (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    task_id VARCHAR(32) NOT NULL,
+                    config_id INTEGER,
+                    content_title VARCHAR(200) NOT NULL,
+                    description TEXT,
+                    result VARCHAR(64) NOT NULL,
+                    evidence TEXT,
+                    suggestion TEXT,
+                    sort_order INTEGER,
+                    created_at DATETIME,
+                    FOREIGN KEY(task_id) REFERENCES diagnosis_tasks (id)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                INSERT INTO diagnosis_results (
+                    task_id, content_title, description, result, evidence,
+                    suggestion, sort_order
+                ) VALUES (
+                    'T-LEGACY-001', '旧检查项', '', '通过', '', '', 0
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
                 INSERT INTO diagnosis_tasks (
                     id, tender_filename, tender_path, bid_filename, bid_path,
                     background, requirements, status, progress_done, progress_total,
@@ -65,19 +96,64 @@ async def test_migrate_adds_tender_file_id_to_legacy_tasks_table(tmp_path, monke
         assert task is not None
         assert task.tender_file_id is None
         assert task.bid_file_id is None
+        assert task.current_checklist_generation_id is None
         assert task.status == "completed"
+        result = await session.get(DiagnosisResult, 1)
+        assert result is not None
+        assert result.content_title == "旧检查项"
+        assert result.checklist_item_id is None
+        assert result.compliance_status is None
+        assert result.consequence_tags == "[]"
 
-    # New workspace tables should exist.
+    # New workspace and checklist tables should exist.
     async with engine.begin() as conn:
         rows = (
             await conn.execute(
                 text(
                     "SELECT name FROM sqlite_master WHERE type='table' "
-                    "AND name IN ('workspace_files', 'parse_jobs')"
+                    "AND name IN ("
+                    "'workspace_files', 'parse_jobs', 'checklist_generations', "
+                    "'checklist_categories', 'checklist_items'"
+                    ")"
                 )
             )
         ).fetchall()
         names = {r[0] for r in rows}
-        assert names == {"workspace_files", "parse_jobs"}
+        assert names == {
+            "workspace_files",
+            "parse_jobs",
+            "checklist_generations",
+            "checklist_categories",
+            "checklist_items",
+        }
+
+        result_columns = {
+            row[1]
+            for row in (
+                await conn.execute(text("PRAGMA table_info('diagnosis_results')"))
+            ).fetchall()
+        }
+        assert {
+            "checklist_item_id",
+            "compliance_status",
+            "consequence_tags",
+        }.issubset(result_columns)
+
+        index_names = [
+            row[1]
+            for row in (
+                await conn.execute(text("PRAGMA index_list('diagnosis_results')"))
+            ).fetchall()
+        ]
+        indexed_columns = {
+            tuple(
+                row[2]
+                for row in (
+                    await conn.execute(text(f"PRAGMA index_info('{index_name}')"))
+                ).fetchall()
+            )
+            for index_name in index_names
+        }
+        assert ("checklist_item_id",) in indexed_columns
 
     await engine.dispose()

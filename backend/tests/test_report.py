@@ -17,7 +17,9 @@ def test_build_markdown_contains_titles():
         {
             "content_title": "资质",
             "description": "d",
-            "result": "风险",
+            "result": "violated",
+            "compliance_status": "violated",
+            "consequence_tags": ["score_risk", "general_risk"],
             "evidence": "e",
             "suggestion": "s",
         },
@@ -25,6 +27,8 @@ def test_build_markdown_contains_titles():
     md = build_markdown("T-1", results)
     assert "# 标书诊断报告" in md
     assert "资质" in md
+    assert "违反" in md
+    assert "得分风险" in md
 
 
 def test_write_docx_creates_non_empty_file(tmp_path):
