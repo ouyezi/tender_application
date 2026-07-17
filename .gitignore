@@ -10,3 +10,6 @@ reports/
 dist/
 .env
 .worktrees/
+
+# Agent create-publish skill local config (may contain auth)
+.cursor/skills/**/config.local.json

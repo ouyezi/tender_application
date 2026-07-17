@@ -1,0 +1,13 @@
+{
+  "baseUrl": "http://localhost:8000",
+  "auth": {
+    "cookie": "",
+    "headerName": "",
+    "headerValue": ""
+  },
+  "defaults": {
+    "agentVersionPublishMode": "latest",
+    "publishMessagePrefix": "skill-create:",
+    "requestTimeoutSec": 60
+  }
+}
