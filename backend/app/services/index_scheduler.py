@@ -19,7 +19,7 @@ from sqlalchemy import select
 from app import config
 from app import db as database
 from app.models import IndexJob, KnowledgeChunk, WorkspaceFile, utcnow
-from app.services.retrieval.enricher import MockChunkEnricher
+from app.services.retrieval.enricher import get_chunk_enricher
 from app.services.retrieval.fts import rebuild_fts_for_file
 from app.services.retrieval.persist import (
     external_text_paths,
@@ -29,7 +29,7 @@ from app.services.retrieval.persist import (
     write_segments,
 )
 from app.services.retrieval.vectors import VectorIndex, get_embedding_model
-from app.services.retrieval.wiki import MockWikiBuilder
+from app.services.retrieval.wiki import get_wiki_builder
 from app.services.retrieval.segments import materialize_segments
 from app.services.retrieval.table_text import merge_table_text_into_segments
 from app.services.retrieval.tags import load_tag_catalog
@@ -149,7 +149,7 @@ async def _rebuild_vectors_for_file(
 
 async def _rebuild_wiki_for_task(session, task_id: str) -> None:
     """Aggregate fine chunks by tag into task-level wiki pages."""
-    await MockWikiBuilder().build_for_task(session, task_id)
+    await get_wiki_builder().build_for_task(session, task_id)
 
 
 async def _claim_next_queued() -> Optional[int]:
@@ -211,7 +211,7 @@ async def _run_job(job_id: int) -> None:
         new_text_paths = external_text_paths(segments, text_dir)
         async with database.SessionLocal() as session:
             catalog = await load_tag_catalog(session)
-            segments = await MockChunkEnricher().enrich_many(
+            segments = await get_chunk_enricher().enrich_many(
                 task_id=task_id,
                 segments=segments,
                 catalog=catalog,

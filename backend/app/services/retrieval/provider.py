@@ -20,8 +20,8 @@ from app.engine.base import RetrievalHit, RetrievalResult
 from app.models import DiagnosisTask, IndexJob, KnowledgeChunk, WorkspaceFile
 from app.services.retrieval.fts import search_fts
 from app.services.retrieval.persist import load_chunk_text
-from app.services.retrieval.rerank import AiReranker, MockAiReranker
-from app.services.retrieval.rewrite import MockQueryRewriter, QueryRewriter
+from app.services.retrieval.rerank import MockAiReranker, get_ai_reranker
+from app.services.retrieval.rewrite import MockQueryRewriter, get_query_rewriter
 from app.services.retrieval.tags import load_tag_catalog, validate_target_tags
 from app.services.retrieval.vectors import VectorIndex, get_embedding_model
 from app.services.retrieval.wiki import search_wiki
@@ -184,21 +184,13 @@ async def _expand_fine_to_large(
     return out
 
 
-def _get_query_rewriter() -> QueryRewriter:
-    return MockQueryRewriter()
-
-
-def _get_ai_reranker() -> AiReranker:
-    return MockAiReranker()
-
-
 async def ai_rerank_hits(
     session: AsyncSession,
     requirement: str,
     hits: list[RetrievalHit],
 ) -> list[str]:
     del session
-    reranker = _get_ai_reranker()
+    reranker = get_ai_reranker()
     return await reranker.rerank(requirement, hits)
 
 
@@ -298,7 +290,7 @@ async def _precise_search(
         "wiki_query": query or " ".join(hints),
     }
     try:
-        rewrite = await _get_query_rewriter().rewrite(query, hints)
+        rewrite = await get_query_rewriter().rewrite(query, hints)
     except Exception:
         degraded = True
 

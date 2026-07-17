@@ -35,3 +35,13 @@ class MockAiReranker:
 
         ordered = sorted(hits, key=_priority, reverse=True)
         return [hit.chunk_id for hit in ordered]
+
+
+def get_ai_reranker() -> AiReranker:
+    from app import config
+
+    if config.AGENT_AI_RERANKER == "agent_os":
+        from app.services.retrieval.rerank_agent_os import AgentOSAiReranker
+
+        return AgentOSAiReranker()
+    return MockAiReranker()

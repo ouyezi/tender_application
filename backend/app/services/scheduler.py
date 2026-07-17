@@ -9,7 +9,6 @@ from app import db as database
 from app.config import (
     MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS,
     MOCK_INTERPRET_DELAY_SECONDS,
-    RETRIEVAL_PROVIDER,
 )
 from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
 from app.engine.checklist_mock import MockChecklistAgent
@@ -35,7 +34,9 @@ class SchedulerConflict(Exception):
 
 
 def build_retrieval_provider():
-    if RETRIEVAL_PROVIDER == "workspace":
+    from app import config
+
+    if config.RETRIEVAL_PROVIDER == "workspace":
         return WorkspaceRetrievalProvider()
     return MockRetrievalProvider()
 

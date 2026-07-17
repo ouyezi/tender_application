@@ -51,6 +51,7 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setattr("app.config.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
     monkeypatch.setattr("app.services.scheduler.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
     monkeypatch.setattr("app.config.CHECKLIST_PARSE_POLL_SECONDS", 0.01)
+    monkeypatch.setattr("app.config.RETRIEVAL_PROVIDER", "mock")
 
     async def _fake_parse_pipeline(file_id: str, task_id: str, stored_path: str):
         from app.services import artifact

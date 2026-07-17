@@ -51,3 +51,13 @@ class MockQueryRewriter:
             "keywords": keywords or [query],
             "wiki_query": wiki_query,
         }
+
+
+def get_query_rewriter() -> QueryRewriter:
+    from app import config
+
+    if config.AGENT_QUERY_REWRITER == "agent_os":
+        from app.services.retrieval.rewrite_agent_os import AgentOSQueryRewriter
+
+        return AgentOSQueryRewriter()
+    return MockQueryRewriter()

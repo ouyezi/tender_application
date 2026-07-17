@@ -48,3 +48,13 @@ class MockChunkEnricher:
             if segment.title_path and not segment.title:
                 segment.title = segment.title_path[-1]
         return segments
+
+
+def get_chunk_enricher() -> ChunkEnricher:
+    from app import config
+
+    if config.AGENT_CHUNK_ENRICHER == "agent_os":
+        from app.services.retrieval.enricher_agent_os import AgentOSChunkEnricher
+
+        return AgentOSChunkEnricher()
+    return MockChunkEnricher()

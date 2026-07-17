@@ -73,6 +73,16 @@ class MockWikiBuilder:
             )
 
 
+def get_wiki_builder() -> WikiBuilder:
+    from app import config
+
+    if config.AGENT_WIKI_BUILDER == "agent_os":
+        from app.services.retrieval.wiki_agent_os import AgentOSWikiBuilder
+
+        return AgentOSWikiBuilder()
+    return MockWikiBuilder()
+
+
 async def search_wiki(
     session: AsyncSession,
     task_id: str,

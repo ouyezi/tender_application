@@ -60,10 +60,10 @@ async def test_batch_rejects_incomplete_mapping():
 
 
 def test_build_retrieval_provider_defaults_to_workspace(monkeypatch):
-    monkeypatch.setattr("app.services.scheduler.RETRIEVAL_PROVIDER", "workspace")
+    monkeypatch.setattr("app.config.RETRIEVAL_PROVIDER", "workspace")
     assert isinstance(build_retrieval_provider(), WorkspaceRetrievalProvider)
 
 
 def test_build_retrieval_provider_mock_when_configured(monkeypatch):
-    monkeypatch.setattr("app.services.scheduler.RETRIEVAL_PROVIDER", "mock")
+    monkeypatch.setattr("app.config.RETRIEVAL_PROVIDER", "mock")
     assert isinstance(build_retrieval_provider(), MockRetrievalProvider)
