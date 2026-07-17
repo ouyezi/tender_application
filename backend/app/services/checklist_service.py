@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import re
-from dataclasses import asdict
-from typing import Any
+from contextlib import asynccontextmanager
+from dataclasses import asdict, dataclass
+from typing import Any, AsyncIterator
+
+from sqlalchemy import delete, update
 
 from app import config, db
 from app.engine.base import (
@@ -20,7 +25,12 @@ from app.models import (
     DiagnosisTask,
     utcnow,
 )
-from app.services.artifact import serialize_checklist_json, write_checklist_json
+from app.services.artifact import (
+    promote_staged_checklist_json,
+    serialize_checklist_json,
+    stage_checklist_json,
+    write_checklist_debug_json,
+)
 from app.services.checklist_context import (
     PromptContext,
     build_prompt_context,
@@ -40,6 +50,37 @@ _CONSEQUENCE_KEYS = {
     "score_risk",
     "general_risk",
 }
+_MAX_PUBLIC_ERROR_LENGTH = 240
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _TaskLockEntry:
+    lock: asyncio.Lock
+    users: int = 0
+
+
+_TASK_LOCKS: dict[str, _TaskLockEntry] = {}
+
+
+@asynccontextmanager
+async def _task_generation_lock(task_id: str) -> AsyncIterator[None]:
+    entry = _TASK_LOCKS.get(task_id)
+    if entry is None:
+        entry = _TaskLockEntry(lock=asyncio.Lock())
+        _TASK_LOCKS[task_id] = entry
+    entry.users += 1
+    acquired = False
+    try:
+        await entry.lock.acquire()
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            entry.lock.release()
+        entry.users -= 1
+        if entry.users == 0 and _TASK_LOCKS.get(task_id) is entry:
+            del _TASK_LOCKS[task_id]
 
 
 class ChecklistValidationError(RuntimeError):
@@ -156,6 +197,7 @@ def validate_draft(
     draft: ChecklistDraft,
     context: PromptContext,
     tender_markdown: str,
+    admin_configs: list[Any],
 ) -> None:
     if not isinstance(draft, ChecklistDraft):
         raise ChecklistValidationError("draft must be a ChecklistDraft")
@@ -190,6 +232,14 @@ def validate_draft(
     item_ids: set[str] = set()
     normalized_items: set[tuple[str, str]] = set()
     category_counts = {category_id: 0 for category_id in category_ids}
+    valid_admin_config_ids = {
+        config_item["id"]
+        for config_item in admin_configs
+        if isinstance(config_item, dict)
+        and isinstance(config_item.get("id"), int)
+        and not isinstance(config_item["id"], bool)
+        and config_item["id"] >= 0
+    }
     for item in draft.items:
         if not isinstance(item, ChecklistItemDraft):
             raise ChecklistValidationError(
@@ -236,16 +286,16 @@ def validate_draft(
             _validate_source_reference(reference, context, tender_markdown, item.id)
         _require_string_list(item.retrieval_hints, "item retrieval_hints")
         _require_string_list(item.expected_evidence, "item expected_evidence")
-        if (
-            not isinstance(item.admin_config_refs, list)
-            or any(
-                not isinstance(reference, int) or isinstance(reference, bool)
-                for reference in item.admin_config_refs
-            )
-        ):
+        if not isinstance(item.admin_config_refs, list):
             raise ChecklistValidationError(
                 "item admin_config_refs must be list[int]"
             )
+        for reference in item.admin_config_refs:
+            _require_nonnegative_int(reference, "item admin_config_refs entry")
+            if reference not in valid_admin_config_ids:
+                raise ChecklistValidationError(
+                    "item admin_config_refs contains an unknown config id"
+                )
         _require_rules(
             item.compliance_rules,
             "item compliance_rules",
@@ -325,6 +375,20 @@ class ChecklistService:
         self.agent = agent
 
     async def generate_for_task(self, task_id: str) -> int:
+        async with _task_generation_lock(task_id):
+            await self._ensure_not_published(task_id)
+            return await self._generate_locked(task_id)
+
+    async def _ensure_not_published(self, task_id: str) -> None:
+        async with db.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if (
+                task is not None
+                and task.current_checklist_generation_id is not None
+            ):
+                raise ChecklistValidationError("checklist already published")
+
+    async def _generate_locked(self, task_id: str) -> int:
         generation_id: int | None = None
         try:
             _, tender_markdown, interpret_markdown, admin_configs = (
@@ -351,33 +415,78 @@ class ChecklistService:
             )
 
             draft = await self.agent.generate(task_id=task_id, context=context)
-            raw_path = write_checklist_json(
+            raw_path = write_checklist_debug_json(
                 task_id,
                 f"checklist-generation-{generation_id}-raw.json",
                 _raw_artifact_payload(draft),
             )
             await self._save_raw_path(generation_id, raw_path.as_posix())
 
-            validate_draft(draft, context, tender_markdown)
+            validate_draft(
+                draft,
+                context,
+                tender_markdown,
+                admin_configs,
+            )
             payload, category_map, item_map = _build_published_payload(
                 draft,
                 generation_id,
             )
-            write_checklist_json(
+            formal_filename = f"checklist-generation-{generation_id}.json"
+            staged_path = stage_checklist_json(
                 task_id,
-                f"checklist-generation-{generation_id}.json",
+                formal_filename,
                 payload,
             )
-            await self._publish(
-                task_id,
-                generation_id,
-                draft,
-                category_map,
-                item_map,
-            )
+            final_path = staged_path.parent / formal_filename
+            try:
+                await self._publish(
+                    task_id,
+                    generation_id,
+                    draft,
+                    category_map,
+                    item_map,
+                )
+                try:
+                    promote_staged_checklist_json(
+                        task_id,
+                        staged_path,
+                        formal_filename,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Checklist artifact promotion failed for task %s",
+                        task_id,
+                    )
+                    try:
+                        await asyncio.shield(
+                            self._compensate_publish(task_id, generation_id)
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Checklist publish compensation failed for task %s",
+                            task_id,
+                        )
+                    finally:
+                        final_path.unlink(missing_ok=True)
+                    raise RuntimeError(
+                        "checklist_artifact_publish_failed"
+                    ) from exc
+            finally:
+                staged_path.unlink(missing_ok=True)
             return generation_id
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                self._fail(
+                    task_id,
+                    generation_id,
+                    public_message="checklist_generation_cancelled",
+                )
+            )
+            raise
         except Exception as exc:
-            await self._fail(task_id, generation_id, exc)
+            logger.exception("Checklist generation failed for task %s", task_id)
+            await self._fail(task_id, generation_id, error=exc)
             raise
 
     async def _create_attempt(
@@ -502,28 +611,98 @@ class ChecklistService:
                 task.finished_at = None
                 task.updated_at = now
 
+    async def _compensate_publish(
+        self,
+        task_id: str,
+        generation_id: int,
+    ) -> None:
+        now = utcnow()
+        async with db.SessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    delete(ChecklistItem).where(
+                        ChecklistItem.generation_id == generation_id
+                    )
+                )
+                await session.execute(
+                    delete(ChecklistCategory).where(
+                        ChecklistCategory.generation_id == generation_id
+                    )
+                )
+                generation = await session.get(
+                    ChecklistGeneration,
+                    generation_id,
+                )
+                if generation is not None:
+                    generation.status = "failed"
+                    generation.error_message = "checklist_generation_failed"
+                    generation.finished_at = now
+                task = await session.get(DiagnosisTask, task_id)
+                if task is not None:
+                    if task.current_checklist_generation_id == generation_id:
+                        task.current_checklist_generation_id = None
+                    task.status = "failed"
+                    task.error_message = "checklist_generation_failed"
+                    task.progress_done = 0
+                    task.progress_total = 0
+                    task.finished_at = now
+                    task.updated_at = now
+
     async def _fail(
         self,
         task_id: str,
         generation_id: int | None,
-        error: Exception,
+        error: Exception | None = None,
+        *,
+        public_message: str | None = None,
     ) -> None:
-        message = f"{type(error).__name__}: {error}"
+        if public_message is None:
+            if isinstance(error, ChecklistValidationError):
+                detail = str(error)[:_MAX_PUBLIC_ERROR_LENGTH]
+                public_message = f"checklist_validation_failed: {detail}"
+            else:
+                public_message = "checklist_generation_failed"
+        public_message = public_message[:_MAX_PUBLIC_ERROR_LENGTH]
         now = utcnow()
         async with db.SessionLocal() as session:
             async with session.begin():
                 if generation_id is not None:
+                    await session.execute(
+                        delete(ChecklistItem).where(
+                            ChecklistItem.generation_id == generation_id
+                        )
+                    )
+                    await session.execute(
+                        delete(ChecklistCategory).where(
+                            ChecklistCategory.generation_id == generation_id
+                        )
+                    )
                     generation = await session.get(
                         ChecklistGeneration,
                         generation_id,
                     )
                     if generation is not None:
                         generation.status = "failed"
-                        generation.error_message = message
+                        generation.error_message = public_message
                         generation.finished_at = now
+                else:
+                    await session.execute(
+                        update(ChecklistGeneration)
+                        .where(
+                            ChecklistGeneration.task_id == task_id,
+                            ChecklistGeneration.status == "generating",
+                        )
+                        .values(
+                            status="failed",
+                            error_message=public_message,
+                            finished_at=now,
+                        )
+                    )
                 task = await session.get(DiagnosisTask, task_id)
                 if task is not None:
+                    if task.current_checklist_generation_id == generation_id:
+                        task.current_checklist_generation_id = None
                     task.status = "failed"
-                    task.error_message = message
+                    task.error_message = public_message
                     task.finished_at = now
                     task.updated_at = now

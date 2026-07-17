@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
-from app.config import UPLOAD_DIR
+from app.config import REPORT_DIR, UPLOAD_DIR
 
 ARTIFACT_SUBDIRS = ("document", "markdown", "image", "table", "json", "report", "other")
 
@@ -41,12 +41,26 @@ def serialize_checklist_json(payload: dict[str, Any]) -> bytes:
     return serialized.encode("utf-8")
 
 
-def write_checklist_json(
-    task_id: str,
+def _fsync_directory(directory: Path) -> None:
+    try:
+        descriptor = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_write_json(
+    directory: Path,
     filename: str,
     payload: dict[str, Any],
 ) -> Path:
-    destination = ensure_artifact_dirs(task_id) / "json" / _safe_name(filename)
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / _safe_name(filename)
     serialized = serialize_checklist_json(payload)
     temporary_path: Path | None = None
     try:
@@ -63,10 +77,60 @@ def write_checklist_json(
             temporary.flush()
             os.fsync(temporary.fileno())
         temporary_path.replace(destination)
+        _fsync_directory(destination.parent)
         return destination
     finally:
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()
+
+
+def write_checklist_json(
+    task_id: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> Path:
+    return _atomic_write_json(
+        ensure_artifact_dirs(task_id) / "json",
+        filename,
+        payload,
+    )
+
+
+def write_checklist_debug_json(
+    task_id: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> Path:
+    return _atomic_write_json(
+        REPORT_DIR / _safe_name(task_id) / "debug",
+        filename,
+        payload,
+    )
+
+
+def stage_checklist_json(
+    task_id: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> Path:
+    directory = ensure_artifact_dirs(task_id) / "json"
+    staged_name = f".{_safe_name(filename)}.staged"
+    return _atomic_write_json(directory, staged_name, payload)
+
+
+def promote_staged_checklist_json(
+    task_id: str,
+    staged_path: Path,
+    filename: str,
+) -> Path:
+    directory = ensure_artifact_dirs(task_id) / "json"
+    staged_path = Path(staged_path)
+    if staged_path.parent.resolve() != directory.resolve():
+        raise ValueError("staged checklist path is outside artifact directory")
+    destination = directory / _safe_name(filename)
+    staged_path.replace(destination)
+    _fsync_directory(directory)
+    return destination
 
 
 def move_into_document(task_id: str, src: Path, *, file_id: str, original_name: str) -> Path:

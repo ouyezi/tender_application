@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.schema import CreateColumn, CreateIndex
 
 from app.config import DATABASE_URL
-from app.models import Base, DiagnosisTask, ParseJob, WorkspaceFile, utcnow
+from app.models import (
+    Base,
+    ChecklistGeneration,
+    DiagnosisTask,
+    ParseJob,
+    WorkspaceFile,
+    utcnow,
+)
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -71,6 +78,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def recover_interrupted_tasks() -> None:
     async with SessionLocal() as session:
+        now = utcnow()
         await session.execute(
             update(DiagnosisTask)
             .where(
@@ -84,7 +92,16 @@ async def recover_interrupted_tasks() -> None:
                     ]
                 )
             )
-            .values(status="stopped", updated_at=utcnow())
+            .values(status="stopped", updated_at=now)
+        )
+        await session.execute(
+            update(ChecklistGeneration)
+            .where(ChecklistGeneration.status == "generating")
+            .values(
+                status="failed",
+                error_message="interrupted",
+                finished_at=now,
+            )
         )
         await session.commit()
 

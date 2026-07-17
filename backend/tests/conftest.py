@@ -37,13 +37,15 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.artifact.UPLOAD_DIR", upload_dir)
     monkeypatch.setattr("app.services.workspace.UPLOAD_DIR", upload_dir)
     (upload_dir).mkdir(parents=True, exist_ok=True)
-    (tmp_path / "reports").mkdir()
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    monkeypatch.setattr("app.services.artifact.REPORT_DIR", report_dir)
     app.router.routes = [
         route for route in app.router.routes if getattr(route, "name", None) != "artifact-files"
     ]
     app.mount("/artifact-files", StaticFiles(directory=str(upload_dir)), name="artifact-files")
-    monkeypatch.setattr("app.services.report.REPORT_DIR", tmp_path / "reports")
-    monkeypatch.setattr("app.services.interpret_report.REPORT_DIR", tmp_path / "reports")
+    monkeypatch.setattr("app.services.report.REPORT_DIR", report_dir)
+    monkeypatch.setattr("app.services.interpret_report.REPORT_DIR", report_dir)
     monkeypatch.setattr("app.config.MOCK_ITEM_DELAY_SECONDS", 0.05)
     monkeypatch.setattr("app.services.scheduler.MOCK_ITEM_DELAY_SECONDS", 0.05)
     monkeypatch.setattr("app.config.MOCK_INTERPRET_DELAY_SECONDS", 0.01)

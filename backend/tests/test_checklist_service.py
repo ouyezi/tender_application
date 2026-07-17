@@ -1,3 +1,4 @@
+import asyncio
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -64,6 +65,18 @@ class FailingAgent:
 class InvalidResponseAgent(StaticAgent):
     def __init__(self, draft: ChecklistDraft):
         super().__init__(replace(draft, raw_response={"invalid": {"set-value"}}))
+
+
+class BlockingAgent(StaticAgent):
+    def __init__(self, draft: ChecklistDraft):
+        super().__init__(draft)
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def generate(self, *, task_id: str, context):
+        self.started.set()
+        await self.release.wait()
+        return await super().generate(task_id=task_id, context=context)
 
 
 def valid_draft(tender_markdown: str) -> ChecklistDraft:
@@ -186,9 +199,14 @@ async def test_generate_persists_rows_pointer_progress_and_artifacts(
     assert json.loads(category.expected_locations) == ["资格审查"]
 
     raw_path = Path(generation.raw_response_path)
-    formal_path = raw_path.with_name(f"checklist-generation-{generation_id}.json")
+    formal_path = (
+        artifact.artifact_root("task-checklist")
+        / "json"
+        / f"checklist-generation-{generation_id}.json"
+    )
     assert json.loads(raw_path.read_text(encoding="utf-8"))["schema_version"] == "1"
     assert json.loads(formal_path.read_text(encoding="utf-8"))["items"][0]["id"] == item.id
+    assert not raw_path.is_relative_to(artifact.UPLOAD_DIR)
     assert agent.context.segments == [tender_markdown]
     assert not list(raw_path.parent.glob("*.tmp"))
 
@@ -202,7 +220,10 @@ async def test_global_ids_do_not_conflict_between_generations(client, tmp_path):
     service = ChecklistService(StaticAgent(valid_draft(tender_markdown)))
 
     first_id = await service.generate_for_task("task-checklist")
-    second_id = await service.generate_for_task("task-checklist")
+    second_markdown = await create_task_source(tmp_path, "task-checklist-2")
+    second_id = await ChecklistService(
+        StaticAgent(valid_draft(second_markdown))
+    ).generate_for_task("task-checklist-2")
 
     async with db.SessionLocal() as session:
         categories = (
@@ -215,7 +236,8 @@ async def test_global_ids_do_not_conflict_between_generations(client, tmp_path):
                 select(ChecklistItem).order_by(ChecklistItem.generation_id)
             )
         ).all()
-        task = await session.get(DiagnosisTask, "task-checklist")
+        first_task = await session.get(DiagnosisTask, "task-checklist")
+        second_task = await session.get(DiagnosisTask, "task-checklist-2")
 
     assert first_id != second_id
     assert len({category.id for category in categories}) == 2
@@ -223,7 +245,82 @@ async def test_global_ids_do_not_conflict_between_generations(client, tmp_path):
     assert [item.category_id for item in items] == [
         category.id for category in categories
     ]
-    assert task.current_checklist_generation_id == second_id
+    assert first_task.current_checklist_generation_id == first_id
+    assert second_task.current_checklist_generation_id == second_id
+
+
+@pytest.mark.asyncio
+async def test_concurrent_generation_publishes_once_without_failing_task(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import (
+        ChecklistService,
+        ChecklistValidationError,
+        _TASK_LOCKS,
+    )
+
+    tender_markdown = await create_task_source(tmp_path)
+    blocking_agent = BlockingAgent(valid_draft(tender_markdown))
+    first_call = asyncio.create_task(
+        ChecklistService(blocking_agent).generate_for_task("task-checklist")
+    )
+    await blocking_agent.started.wait()
+    second_call = asyncio.create_task(
+        ChecklistService(
+            StaticAgent(valid_draft(tender_markdown))
+        ).generate_for_task("task-checklist")
+    )
+    await asyncio.sleep(0)
+    blocking_agent.release.set()
+
+    first_result, second_result = await asyncio.gather(
+        first_call,
+        second_call,
+        return_exceptions=True,
+    )
+
+    assert isinstance(first_result, int)
+    assert isinstance(second_result, ChecklistValidationError)
+    assert str(second_result) == "checklist already published"
+    async with db.SessionLocal() as session:
+        generations = (await session.scalars(select(ChecklistGeneration))).all()
+        task = await session.get(DiagnosisTask, "task-checklist")
+
+    assert len(generations) == 1
+    assert generations[0].status == "succeeded"
+    assert task.current_checklist_generation_id == first_result
+    assert task.status != "failed"
+    assert _TASK_LOCKS == {}
+
+
+@pytest.mark.asyncio
+async def test_cancellation_marks_attempt_and_task_failed(client, tmp_path):
+    del client
+    from app.services.checklist_service import ChecklistService, _TASK_LOCKS
+
+    tender_markdown = await create_task_source(tmp_path)
+    agent = BlockingAgent(valid_draft(tender_markdown))
+    call = asyncio.create_task(
+        ChecklistService(agent).generate_for_task("task-checklist")
+    )
+    await agent.started.wait()
+
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+
+    assert generation.status == "failed"
+    assert generation.error_message == "checklist_generation_cancelled"
+    assert generation.finished_at is not None
+    assert task.status == "failed"
+    assert task.error_message == "checklist_generation_cancelled"
+    assert task.current_checklist_generation_id is None
+    assert _TASK_LOCKS == {}
 
 
 @pytest.mark.asyncio
@@ -439,6 +536,10 @@ def invalid_draft_cases(tender_markdown: str):
             ),
             "offset",
         ),
+        (
+            replace(draft, items=[replace(item, admin_config_refs=[999])]),
+            "admin_config_refs",
+        ),
     ]
 
 
@@ -532,7 +633,7 @@ async def test_invalid_field_types_raise_validation_errors(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case_index", range(7))
+@pytest.mark.parametrize("case_index", range(8))
 async def test_invalid_drafts_fail_cleanly(client, tmp_path, case_index):
     del client
     from app.services.checklist_service import (
@@ -584,6 +685,37 @@ async def test_agent_exception_marks_generation_and_task_failed(client, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_unexpected_exception_does_not_leak_sensitive_details(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import ChecklistService
+
+    class SensitiveFailingAgent:
+        async def generate(self, *, task_id: str, context):
+            del task_id, context
+            raise RuntimeError(
+                "secret-token at /Users/private/credentials.json"
+            )
+
+    await create_task_source(tmp_path)
+
+    with pytest.raises(RuntimeError):
+        await ChecklistService(SensitiveFailingAgent()).generate_for_task(
+            "task-checklist"
+        )
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+
+    assert generation.error_message == "checklist_generation_failed"
+    assert task.error_message == "checklist_generation_failed"
+    assert "secret-token" not in task.error_message
+    assert "/Users/" not in task.error_message
+
+
+@pytest.mark.asyncio
 async def test_publish_database_error_rolls_back_all_formal_rows(
     client, tmp_path, monkeypatch
 ):
@@ -615,3 +747,47 @@ async def test_publish_database_error_rolls_back_all_formal_rows(
     assert task.current_checklist_generation_id is None
     assert categories == []
     assert items == []
+    json_dir = artifact.artifact_root("task-checklist") / "json"
+    assert not list(json_dir.glob("checklist-generation-*.json"))
+    assert not list(json_dir.glob("*staged*"))
+
+
+@pytest.mark.asyncio
+async def test_artifact_promotion_failure_compensates_published_database(
+    client, tmp_path, monkeypatch
+):
+    del client
+    from app.services.checklist_service import ChecklistService
+
+    tender_markdown = await create_task_source(tmp_path)
+
+    def fail_promotion(*args, **kwargs):
+        del args, kwargs
+        raise OSError("secret-token /Users/private/artifact.json")
+
+    monkeypatch.setattr(
+        "app.services.checklist_service.promote_staged_checklist_json",
+        fail_promotion,
+    )
+
+    with pytest.raises(RuntimeError, match="checklist_artifact_publish_failed"):
+        await ChecklistService(
+            StaticAgent(valid_draft(tender_markdown))
+        ).generate_for_task("task-checklist")
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+        categories = (await session.scalars(select(ChecklistCategory))).all()
+        items = (await session.scalars(select(ChecklistItem))).all()
+
+    assert generation.status == "failed"
+    assert generation.error_message == "checklist_generation_failed"
+    assert task.status == "failed"
+    assert task.error_message == "checklist_generation_failed"
+    assert task.current_checklist_generation_id is None
+    assert categories == []
+    assert items == []
+    json_dir = artifact.artifact_root("task-checklist") / "json"
+    assert not list(json_dir.glob("checklist-generation-*.json"))
+    assert not list(json_dir.glob("*staged*"))

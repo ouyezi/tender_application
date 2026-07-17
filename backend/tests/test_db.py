@@ -1,9 +1,16 @@
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import models
 from app.db import recover_interrupted_tasks
-from app.models import Base, DiagnosisConfig, DiagnosisResult, DiagnosisTask
+from app.models import (
+    Base,
+    ChecklistGeneration,
+    DiagnosisConfig,
+    DiagnosisResult,
+    DiagnosisTask,
+)
 
 
 @pytest.mark.asyncio
@@ -197,6 +204,20 @@ async def test_recover_interrupted_tasks(tmp_path, monkeypatch):
                     status=status,
                 )
             )
+        session.add_all(
+            [
+                ChecklistGeneration(
+                    task_id="task-generating-checklist",
+                    status="generating",
+                    input_hash="interrupted-hash",
+                ),
+                ChecklistGeneration(
+                    task_id="task-done",
+                    status="succeeded",
+                    input_hash="completed-hash",
+                ),
+            ]
+        )
         await session.commit()
 
     await recover_interrupted_tasks()
@@ -210,11 +231,29 @@ async def test_recover_interrupted_tasks(tmp_path, monkeypatch):
             DiagnosisTask, "task-generating-checklist"
         )
         done = await session.get(DiagnosisTask, "task-done")
+        interrupted_generation = (
+            await session.scalars(
+                select(ChecklistGeneration).where(
+                    ChecklistGeneration.input_hash == "interrupted-hash"
+                )
+            )
+        ).one()
+        completed_generation = (
+            await session.scalars(
+                select(ChecklistGeneration).where(
+                    ChecklistGeneration.input_hash == "completed-hash"
+                )
+            )
+        ).one()
         assert interpreting.status == "stopped"
         assert diagnosing.status == "stopped"
         assert running.status == "stopped"
         assert paused.status == "stopped"
         assert generating_checklist.status == "stopped"
         assert done.status == "completed"
+        assert interrupted_generation.status == "failed"
+        assert interrupted_generation.error_message == "interrupted"
+        assert interrupted_generation.finished_at is not None
+        assert completed_generation.status == "succeeded"
 
     await engine.dispose()
