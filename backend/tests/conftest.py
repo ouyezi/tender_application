@@ -7,7 +7,7 @@ from sqlalchemy.pool import NullPool
 from app.db import get_db
 from app.main import app
 from app.models import Base
-from app.services import parse_scheduler, scheduler
+from app.services import index_scheduler, parse_scheduler, scheduler
 
 
 @pytest_asyncio.fixture
@@ -85,6 +85,7 @@ async def client(tmp_path, monkeypatch):
     )
     await scheduler.reset_for_tests()
     await parse_scheduler.reset_for_tests()
+    await index_scheduler.reset_for_tests()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -92,5 +93,6 @@ async def client(tmp_path, monkeypatch):
 
     await scheduler.reset_for_tests()
     await parse_scheduler.reset_for_tests()
+    await index_scheduler.reset_for_tests()
     app.dependency_overrides.clear()
     await engine.dispose()

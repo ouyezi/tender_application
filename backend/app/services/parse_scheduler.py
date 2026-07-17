@@ -178,3 +178,9 @@ async def _run_job(job_id: int) -> None:
             job.finished_at = utcnow()
         await session.commit()
         await workspace.artifact_refresh_index(session, task_id)
+
+    if result["status"] in ("succeeded", "partial"):
+        from app.services import index_scheduler
+
+        await index_scheduler.enqueue(task_id, file_id)
+        await index_scheduler.kick()

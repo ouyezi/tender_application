@@ -23,9 +23,10 @@ async def lifespan(app: FastAPI):
     from app.services.checklist_service import recover_checklist_publications
 
     await recover_checklist_publications()
-    from app.services import parse_scheduler
+    from app.services import index_scheduler, parse_scheduler
 
     await parse_scheduler.kick()
+    await index_scheduler.kick()
     yield
 
 
