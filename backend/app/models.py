@@ -49,6 +49,9 @@ class DiagnosisTask(Base):
     report_docx_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     interpret_md_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     interpret_html_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    current_checklist_generation_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("checklist_generations.id"), nullable=True
+    )
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -57,17 +60,91 @@ class DiagnosisTask(Base):
     results: Mapped[list["DiagnosisResult"]] = relationship(back_populates="task", cascade="all, delete-orphan")
 
 
+class ChecklistGeneration(Base):
+    __tablename__ = "checklist_generations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("diagnosis_tasks.id"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    agent_type: Mapped[str] = mapped_column(String(32), nullable=False, default="mock")
+    agent_version: Mapped[str] = mapped_column(String(64), nullable=False, default="1")
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False, default="1")
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    admin_config_snapshot: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]"
+    )
+    raw_response_path: Mapped[Optional[str]] = mapped_column(
+        String(1024), nullable=True
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class ChecklistCategory(Base):
+    __tablename__ = "checklist_categories"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    generation_id: Mapped[int] = mapped_column(
+        ForeignKey("checklist_generations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    retrieval_query: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_locations: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class ChecklistItem(Base):
+    __tablename__ = "checklist_items"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    generation_id: Mapped[int] = mapped_column(
+        ForeignKey("checklist_generations.id"), nullable=False, index=True
+    )
+    category_id: Mapped[str] = mapped_column(
+        ForeignKey("checklist_categories.id"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    requirement: Mapped[str] = mapped_column(Text, nullable=False)
+    technique: Mapped[str] = mapped_column(Text, nullable=False)
+    importance: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_references: Mapped[str] = mapped_column(Text, nullable=False)
+    retrieval_hints: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_evidence: Mapped[str] = mapped_column(Text, nullable=False)
+    compliance_rules: Mapped[str] = mapped_column(Text, nullable=False)
+    consequence_rules: Mapped[str] = mapped_column(Text, nullable=False)
+    admin_config_refs: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+
 class DiagnosisResult(Base):
     __tablename__ = "diagnosis_results"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(ForeignKey("diagnosis_tasks.id"), nullable=False, index=True)
     config_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    checklist_item_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("checklist_items.id"), nullable=True, index=True
+    )
     content_title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     result: Mapped[str] = mapped_column(String(64), nullable=False)
     evidence: Mapped[str] = mapped_column(Text, default="")
     suggestion: Mapped[str] = mapped_column(Text, default="")
+    compliance_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    consequence_tags: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

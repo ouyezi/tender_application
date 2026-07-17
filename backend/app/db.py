@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy import inspect, text, update
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.schema import CreateColumn
 
 from app.config import DATABASE_URL
 from app.models import Base, DiagnosisTask, ParseJob, WorkspaceFile, utcnow
@@ -19,7 +20,7 @@ def _migrate_sqlite_columns(sync_conn) -> None:
     """
     inspector = inspect(sync_conn)
     dialect = sqlite.dialect()
-    for table in Base.metadata.sorted_tables:
+    for table in Base.metadata.tables.values():
         if not inspector.has_table(table.name):
             continue
         existing = {col["name"] for col in inspector.get_columns(table.name)}
@@ -29,8 +30,11 @@ def _migrate_sqlite_columns(sync_conn) -> None:
             if not column.nullable and column.server_default is None:
                 # Avoid ADD COLUMN NOT NULL without a default on populated tables.
                 continue
-            col_type = column.type.compile(dialect=dialect)
-            sync_conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {col_type}"))
+            if column.server_default is not None:
+                column_ddl = CreateColumn(column).compile(dialect=dialect)
+            else:
+                column_ddl = f"{column.name} {column.type.compile(dialect=dialect)}"
+            sync_conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {column_ddl}"))
 
 
 def init_db_on_connection(sync_conn) -> None:
@@ -54,7 +58,13 @@ async def recover_interrupted_tasks() -> None:
             update(DiagnosisTask)
             .where(
                 DiagnosisTask.status.in_(
-                    ["interpreting", "diagnosing", "running", "paused"]
+                    [
+                        "interpreting",
+                        "generating_checklist",
+                        "diagnosing",
+                        "running",
+                        "paused",
+                    ]
                 )
             )
             .values(status="stopped", updated_at=utcnow())
