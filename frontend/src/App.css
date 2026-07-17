@@ -958,11 +958,36 @@ a:hover {
   white-space: nowrap;
 }
 
-.checklist-row {
+.checklist-expand-head {
+  width: 3rem;
+  text-align: center;
+}
+
+.checklist-expand-cell {
+  width: 3rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.checklist-toggle {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
   cursor: pointer;
 }
 
-.checklist-row:hover,
+.checklist-toggle:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
 .checklist-row-expanded {
   background: #f8fafc;
 }

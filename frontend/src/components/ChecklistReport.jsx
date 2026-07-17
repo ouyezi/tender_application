@@ -49,6 +49,10 @@ function formatJson(value) {
   }
 }
 
+function isLegacyUnavailableError(detail) {
+  return !detail || detail === 'Checklist not available'
+}
+
 export default function ChecklistReport({
   taskId,
   taskStatus,
@@ -115,6 +119,10 @@ export default function ChecklistReport({
     } finally {
       setRetrying(false)
     }
+  }
+
+  function toggleItemExpansion(itemId) {
+    setExpandedItemId((current) => (current === itemId ? null : itemId))
   }
 
   if (loading) {
@@ -185,6 +193,9 @@ export default function ChecklistReport({
             <table className="checklist-table">
               <thead>
                 <tr>
+                  <th scope="col" className="checklist-expand-head">
+                    详情
+                  </th>
                   <th>诊断标题</th>
                   <th>诊断要求</th>
                   <th>诊断技巧</th>
@@ -195,14 +206,21 @@ export default function ChecklistReport({
               <tbody>
                 {filteredItems.map((item) => {
                   const expanded = expandedItemId === item.id
+                  const itemTitle = item.title || '未命名检查项'
                   return (
                     <Fragment key={item.id}>
-                      <tr
-                        className={expanded ? 'checklist-row-expanded' : 'checklist-row'}
-                        onClick={() =>
-                          setExpandedItemId(expanded ? null : item.id)
-                        }
-                      >
+                      <tr className={expanded ? 'checklist-row-expanded' : 'checklist-row'}>
+                        <td className="checklist-expand-cell">
+                          <button
+                            type="button"
+                            className="checklist-toggle"
+                            onClick={() => toggleItemExpansion(item.id)}
+                            aria-label={expanded ? `收起 ${itemTitle}` : `展开 ${itemTitle}`}
+                            aria-expanded={expanded}
+                          >
+                            {expanded ? '▾' : '▸'}
+                          </button>
+                        </td>
                         <td>{item.title || '—'}</td>
                         <td>{item.requirement || '—'}</td>
                         <td>{item.technique || '—'}</td>
@@ -211,7 +229,7 @@ export default function ChecklistReport({
                       </tr>
                       {expanded && (
                         <tr className="checklist-expand-row">
-                          <td colSpan={5}>
+                          <td colSpan={6}>
                             <div className="checklist-expand">
                               <div className="checklist-expand-block">
                                 <span className="checklist-expand-label">来源引用</span>
@@ -307,6 +325,10 @@ export default function ChecklistReport({
         <p className="page-error">检查项数据异常，请联系管理员。</p>
       </div>
     )
+  }
+
+  if (!isLegacyUnavailableError(loadError)) {
+    return <p className="page-error">{loadError}</p>
   }
 
   return <p className="empty-state-hint">暂无检查项报告</p>
