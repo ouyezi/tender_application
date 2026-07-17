@@ -113,9 +113,13 @@ def stage_checklist_json(
     filename: str,
     payload: dict[str, Any],
 ) -> Path:
-    directory = ensure_artifact_dirs(task_id) / "json"
+    directory = REPORT_DIR / _safe_name(task_id) / "staging"
     staged_name = f".{_safe_name(filename)}.staged"
     return _atomic_write_json(directory, staged_name, payload)
+
+
+def checklist_json_path(task_id: str, filename: str) -> Path:
+    return ensure_artifact_dirs(task_id) / "json" / _safe_name(filename)
 
 
 def promote_staged_checklist_json(
@@ -123,13 +127,14 @@ def promote_staged_checklist_json(
     staged_path: Path,
     filename: str,
 ) -> Path:
-    directory = ensure_artifact_dirs(task_id) / "json"
+    staging_directory = REPORT_DIR / _safe_name(task_id) / "staging"
     staged_path = Path(staged_path)
-    if staged_path.parent.resolve() != directory.resolve():
-        raise ValueError("staged checklist path is outside artifact directory")
-    destination = directory / _safe_name(filename)
-    staged_path.replace(destination)
-    _fsync_directory(directory)
+    if staged_path.parent.resolve() != staging_directory.resolve():
+        raise ValueError("staged checklist path is outside private staging directory")
+    destination = checklist_json_path(task_id, filename)
+    os.replace(staged_path, destination)
+    _fsync_directory(staging_directory)
+    _fsync_directory(destination.parent)
     return destination
 
 

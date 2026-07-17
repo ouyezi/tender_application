@@ -26,6 +26,7 @@ from app.models import (
     utcnow,
 )
 from app.services.artifact import (
+    checklist_json_path,
     promote_staged_checklist_json,
     serialize_checklist_json,
     stage_checklist_json,
@@ -81,6 +82,24 @@ async def _task_generation_lock(task_id: str) -> AsyncIterator[None]:
         entry.users -= 1
         if entry.users == 0 and _TASK_LOCKS.get(task_id) is entry:
             del _TASK_LOCKS[task_id]
+
+
+async def _wait_for_cleanup_task(cleanup_task: asyncio.Task[None]) -> None:
+    current_task = asyncio.current_task()
+
+    def consume_pending_cancellations() -> None:
+        if current_task is None:
+            return
+        while current_task.cancelling():
+            current_task.uncancel()
+
+    consume_pending_cancellations()
+    while not cleanup_task.done():
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            consume_pending_cancellations()
+    cleanup_task.result()
 
 
 class ChecklistValidationError(RuntimeError):
@@ -361,12 +380,18 @@ def _build_published_payload(
     if len(set(item_map.values())) != len(item_map):
         raise ChecklistValidationError("item global ID hash collision")
 
-    payload = asdict(draft)
-    for category in payload["categories"]:
+    categories = [asdict(category) for category in draft.categories]
+    for category in categories:
         category["id"] = category_map[category["id"]]
-    for item in payload["items"]:
+    items = [asdict(item) for item in draft.items]
+    for item in items:
         item["id"] = item_map[item["id"]]
         item["category_id"] = category_map[item["category_id"]]
+    payload = {
+        "schema_version": draft.schema_version,
+        "categories": categories,
+        "items": items,
+    }
     return payload, category_map, item_map
 
 
@@ -438,7 +463,7 @@ class ChecklistService:
                 formal_filename,
                 payload,
             )
-            final_path = staged_path.parent / formal_filename
+            final_path = checklist_json_path(task_id, formal_filename)
             try:
                 await self._publish(
                     task_id,
@@ -475,15 +500,22 @@ class ChecklistService:
             finally:
                 staged_path.unlink(missing_ok=True)
             return generation_id
-        except asyncio.CancelledError:
-            await asyncio.shield(
+        except asyncio.CancelledError as cancelled_error:
+            cleanup_task = asyncio.create_task(
                 self._fail(
                     task_id,
                     generation_id,
                     public_message="checklist_generation_cancelled",
                 )
             )
-            raise
+            try:
+                await _wait_for_cleanup_task(cleanup_task)
+            except BaseException:
+                logger.exception(
+                    "Checklist cancellation cleanup failed for task %s",
+                    task_id,
+                )
+            raise cancelled_error
         except Exception as exc:
             logger.exception("Checklist generation failed for task %s", task_id)
             await self._fail(task_id, generation_id, error=exc)
@@ -658,8 +690,7 @@ class ChecklistService:
     ) -> None:
         if public_message is None:
             if isinstance(error, ChecklistValidationError):
-                detail = str(error)[:_MAX_PUBLIC_ERROR_LENGTH]
-                public_message = f"checklist_validation_failed: {detail}"
+                public_message = "checklist_validation_failed"
             else:
                 public_message = "checklist_generation_failed"
         public_message = public_message[:_MAX_PUBLIC_ERROR_LENGTH]

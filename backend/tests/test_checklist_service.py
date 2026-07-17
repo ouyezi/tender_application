@@ -163,7 +163,14 @@ async def test_generate_persists_rows_pointer_progress_and_artifacts(
     from app.services.checklist_service import ChecklistService
 
     tender_markdown = await create_task_source(tmp_path)
-    agent = StaticAgent(valid_draft(tender_markdown))
+    draft = replace(
+        valid_draft(tender_markdown),
+        raw_response={
+            "provider": "fixture-provider",
+            "token": "test-secret",
+        },
+    )
+    agent = StaticAgent(draft)
 
     generation_id = await ChecklistService(agent).generate_for_task("task-checklist")
 
@@ -204,8 +211,14 @@ async def test_generate_persists_rows_pointer_progress_and_artifacts(
         / "json"
         / f"checklist-generation-{generation_id}.json"
     )
-    assert json.loads(raw_path.read_text(encoding="utf-8"))["schema_version"] == "1"
-    assert json.loads(formal_path.read_text(encoding="utf-8"))["items"][0]["id"] == item.id
+    raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
+    formal_payload = json.loads(formal_path.read_text(encoding="utf-8"))
+    assert raw_payload["raw_response"]["provider"] == "fixture-provider"
+    assert formal_payload["items"][0]["id"] == item.id
+    assert set(formal_payload) == {"schema_version", "categories", "items"}
+    assert "raw_response" not in formal_payload
+    assert "fixture-provider" not in formal_path.read_text(encoding="utf-8")
+    assert "test-secret" not in formal_path.read_text(encoding="utf-8")
     assert not raw_path.is_relative_to(artifact.UPLOAD_DIR)
     assert agent.context.segments == [tender_markdown]
     assert not list(raw_path.parent.glob("*.tmp"))
@@ -247,6 +260,47 @@ async def test_global_ids_do_not_conflict_between_generations(client, tmp_path):
     ]
     assert first_task.current_checklist_generation_id == first_id
     assert second_task.current_checklist_generation_id == second_id
+
+
+@pytest.mark.asyncio
+async def test_staged_payload_is_private_until_database_publish(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import ChecklistService
+
+    class PausingPublishService(ChecklistService):
+        def __init__(self, agent):
+            super().__init__(agent)
+            self.publish_started = asyncio.Event()
+            self.continue_publish = asyncio.Event()
+
+        async def _publish(self, *args, **kwargs):
+            self.publish_started.set()
+            await self.continue_publish.wait()
+            await super()._publish(*args, **kwargs)
+
+    tender_markdown = await create_task_source(tmp_path)
+    service = PausingPublishService(
+        StaticAgent(valid_draft(tender_markdown))
+    )
+    call = asyncio.create_task(service.generate_for_task("task-checklist"))
+    await service.publish_started.wait()
+
+    public_json_dir = artifact.artifact_root("task-checklist") / "json"
+    private_staging_dir = (
+        artifact.REPORT_DIR / "task-checklist" / "staging"
+    )
+    assert not list(public_json_dir.glob("checklist-generation-*.json"))
+    assert not list(public_json_dir.glob("*staged*"))
+    assert list(private_staging_dir.glob("*staged*"))
+
+    service.continue_publish.set()
+    generation_id = await call
+    assert (
+        public_json_dir / f"checklist-generation-{generation_id}.json"
+    ).is_file()
+    assert not list(private_staging_dir.glob("*staged*"))
 
 
 @pytest.mark.asyncio
@@ -324,6 +378,70 @@ async def test_cancellation_marks_attempt_and_task_failed(client, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_repeated_cancellation_waits_for_cleanup_before_retry(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import ChecklistService, _TASK_LOCKS
+
+    class SlowCleanupService(ChecklistService):
+        def __init__(self, agent):
+            super().__init__(agent)
+            self.cleanup_started = asyncio.Event()
+            self.finish_cleanup = asyncio.Event()
+
+        async def _fail(self, *args, **kwargs):
+            self.cleanup_started.set()
+            await self.finish_cleanup.wait()
+            await super()._fail(*args, **kwargs)
+
+    tender_markdown = await create_task_source(tmp_path)
+    blocking_agent = BlockingAgent(valid_draft(tender_markdown))
+    service = SlowCleanupService(blocking_agent)
+    cancelled_call = asyncio.create_task(
+        service.generate_for_task("task-checklist")
+    )
+    await blocking_agent.started.wait()
+
+    cancelled_call.cancel()
+    await service.cleanup_started.wait()
+    for _ in range(3):
+        cancelled_call.cancel()
+        await asyncio.sleep(0)
+    assert not cancelled_call.done()
+    retry_call = asyncio.create_task(
+        ChecklistService(
+            StaticAgent(valid_draft(tender_markdown))
+        ).generate_for_task("task-checklist")
+    )
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    retry_finished_before_cleanup = retry_call.done()
+    service.finish_cleanup.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled_call
+    generation_id = await retry_call
+
+    async with db.SessionLocal() as session:
+        generations = (
+            await session.scalars(
+                select(ChecklistGeneration).order_by(ChecklistGeneration.id)
+            )
+        ).all()
+        task = await session.get(DiagnosisTask, "task-checklist")
+
+    assert retry_finished_before_cleanup is False
+    assert [generation.status for generation in generations] == [
+        "failed",
+        "succeeded",
+    ]
+    assert task.current_checklist_generation_id == generation_id
+    assert task.error_message is None
+    assert _TASK_LOCKS == {}
+
+
+@pytest.mark.asyncio
 async def test_unserializable_raw_response_saves_fallback_then_fails_validation(
     client, tmp_path
 ):
@@ -354,8 +472,9 @@ async def test_unserializable_raw_response_saves_fallback_then_fails_validation(
     assert fallback["serialization_error"]
     assert "set-value" in fallback["safe_repr"]
     assert generation.status == "failed"
-    assert "raw_response must be JSON serializable" in generation.error_message
+    assert generation.error_message == "checklist_validation_failed"
     assert task.status == "failed"
+    assert task.error_message == "checklist_validation_failed"
     assert task.current_checklist_generation_id is None
     assert categories == []
     assert items == []
@@ -654,11 +773,11 @@ async def test_invalid_drafts_fail_cleanly(client, tmp_path, case_index):
         items = (await session.scalars(select(ChecklistItem))).all()
 
     assert generation.status == "failed"
-    assert expected_error in generation.error_message
+    assert generation.error_message == "checklist_validation_failed"
     assert Path(generation.raw_response_path).is_file()
     assert generation.finished_at is not None
     assert task.status == "failed"
-    assert expected_error in task.error_message
+    assert task.error_message == "checklist_validation_failed"
     assert task.current_checklist_generation_id is None
     assert categories == []
     assert items == []
@@ -750,6 +869,10 @@ async def test_publish_database_error_rolls_back_all_formal_rows(
     json_dir = artifact.artifact_root("task-checklist") / "json"
     assert not list(json_dir.glob("checklist-generation-*.json"))
     assert not list(json_dir.glob("*staged*"))
+    private_staging_dir = (
+        artifact.REPORT_DIR / "task-checklist" / "staging"
+    )
+    assert not list(private_staging_dir.glob("*staged*"))
 
 
 @pytest.mark.asyncio
@@ -791,3 +914,7 @@ async def test_artifact_promotion_failure_compensates_published_database(
     json_dir = artifact.artifact_root("task-checklist") / "json"
     assert not list(json_dir.glob("checklist-generation-*.json"))
     assert not list(json_dir.glob("*staged*"))
+    private_staging_dir = (
+        artifact.REPORT_DIR / "task-checklist" / "staging"
+    )
+    assert not list(private_staging_dir.glob("*staged*"))
