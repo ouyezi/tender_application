@@ -7,7 +7,12 @@ from dataclasses import asdict
 from typing import Any
 
 from app import config, db
-from app.engine.base import ChecklistAgent, ChecklistDraft
+from app.engine.base import (
+    ChecklistAgent,
+    ChecklistCategoryDraft,
+    ChecklistDraft,
+    ChecklistItemDraft,
+)
 from app.models import (
     ChecklistCategory,
     ChecklistGeneration,
@@ -46,6 +51,17 @@ def _require_nonempty_string(value: Any, field: str) -> None:
         raise ChecklistValidationError(f"{field} must be a non-empty string")
 
 
+def _require_nonnegative_int(value: Any, field: str) -> None:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value < 0
+    ):
+        raise ChecklistValidationError(
+            f"{field} must be a non-negative integer"
+        )
+
+
 def _require_string_list(
     value: Any,
     field: str,
@@ -64,15 +80,17 @@ def _require_string_list(
 def _require_rules(value: Any, field: str, allowed_keys: set[str]) -> None:
     if not isinstance(value, dict) or not value:
         raise ChecklistValidationError(f"{field} must be a non-empty dict[str, str]")
-    if any(key not in allowed_keys for key in value):
-        raise ChecklistValidationError(f"{field} contains an unsupported key")
     if any(
         not isinstance(key, str)
         or not isinstance(rule, str)
         or not rule.strip()
         for key, rule in value.items()
     ):
-        raise ChecklistValidationError(f"{field} values must be non-empty strings")
+        raise ChecklistValidationError(
+            f"{field} must contain string keys and non-empty string values"
+        )
+    if any(key not in allowed_keys for key in value):
+        raise ChecklistValidationError(f"{field} contains an unsupported key")
 
 
 def _validate_source_reference(
@@ -86,24 +104,27 @@ def _validate_source_reference(
             f"item {item_id} source_references entries must be objects"
         )
     coordinate_space = reference.get("coordinate_space")
+    if not isinstance(coordinate_space, str):
+        raise ChecklistValidationError(
+            f"item {item_id} source coordinate_space must be a string"
+        )
+    if "synthetic" in reference and not isinstance(reference["synthetic"], bool):
+        raise ChecklistValidationError(
+            f"item {item_id} source synthetic must be a boolean"
+        )
+
     start = reference.get("start")
     end = reference.get("end")
-    if (
-        not isinstance(start, int)
-        or isinstance(start, bool)
-        or not isinstance(end, int)
-        or isinstance(end, bool)
-    ):
-        raise ChecklistValidationError(f"item {item_id} source offset must be integers")
+    segment_index = reference.get("segment_index")
+    _require_nonnegative_int(start, f"item {item_id} source start")
+    _require_nonnegative_int(end, f"item {item_id} source end")
+    _require_nonnegative_int(
+        segment_index,
+        f"item {item_id} source segment_index",
+    )
 
     if coordinate_space == "segment":
-        segment_index = reference.get("segment_index")
-        if (
-            not isinstance(segment_index, int)
-            or isinstance(segment_index, bool)
-            or segment_index < 0
-            or segment_index >= len(context.segments)
-        ):
+        if segment_index >= len(context.segments):
             raise ChecklistValidationError(
                 f"item {item_id} source segment_index is invalid"
             )
@@ -136,6 +157,9 @@ def validate_draft(
     context: PromptContext,
     tender_markdown: str,
 ) -> None:
+    if not isinstance(draft, ChecklistDraft):
+        raise ChecklistValidationError("draft must be a ChecklistDraft")
+    _require_nonempty_string(draft.schema_version, "schema_version")
     if draft.schema_version != config.CHECKLIST_SCHEMA_VERSION:
         raise ChecklistValidationError("schema_version does not match configuration")
     if not isinstance(draft.categories, list) or not draft.categories:
@@ -145,6 +169,10 @@ def validate_draft(
 
     category_ids: set[str] = set()
     for category in draft.categories:
+        if not isinstance(category, ChecklistCategoryDraft):
+            raise ChecklistValidationError(
+                "categories entries must be ChecklistCategoryDraft"
+            )
         _require_nonempty_string(category.id, "category id")
         if category.id in category_ids:
             raise ChecklistValidationError("category local id must be unique")
@@ -157,15 +185,21 @@ def validate_draft(
             "category expected_locations",
             allow_empty=True,
         )
+        _require_nonnegative_int(category.sort_order, "category sort_order")
 
     item_ids: set[str] = set()
     normalized_items: set[tuple[str, str]] = set()
     category_counts = {category_id: 0 for category_id in category_ids}
     for item in draft.items:
+        if not isinstance(item, ChecklistItemDraft):
+            raise ChecklistValidationError(
+                "items entries must be ChecklistItemDraft"
+            )
         _require_nonempty_string(item.id, "item id")
         if item.id in item_ids:
             raise ChecklistValidationError("item local id must be unique")
         item_ids.add(item.id)
+        _require_nonempty_string(item.category_id, "item category_id")
         if item.category_id not in category_ids:
             raise ChecklistValidationError(
                 f"item {item.id} references an unknown category"
@@ -179,6 +213,8 @@ def validate_draft(
         _require_nonempty_string(item.title, "item title")
         _require_nonempty_string(item.requirement, "item requirement")
         _require_nonempty_string(item.technique, "item technique")
+        _require_nonempty_string(item.importance, "item importance")
+        _require_nonnegative_int(item.sort_order, "item sort_order")
         normalized = (
             re.sub(r"\s+", "", item.title).casefold(),
             re.sub(r"\s+", "", item.requirement).casefold(),
@@ -221,9 +257,11 @@ def validate_draft(
             _CONSEQUENCE_KEYS,
         )
 
+    if not isinstance(draft.raw_response, dict):
+        raise ChecklistValidationError("raw_response must be a dict")
     try:
         json.dumps(draft.raw_response, ensure_ascii=False)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise ChecklistValidationError(
             "raw_response must be JSON serializable"
         ) from exc

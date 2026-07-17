@@ -314,6 +314,95 @@ def invalid_draft_cases(tender_markdown: str):
     ]
 
 
+def invalid_field_type_cases(tender_markdown: str):
+    draft = valid_draft(tender_markdown)
+    category = draft.categories[0]
+    item = draft.items[0]
+    source_reference = item.source_references[0]
+    return [
+        (
+            replace(draft, categories=[replace(category, sort_order="1")]),
+            "category sort_order",
+        ),
+        (
+            replace(draft, items=[replace(item, sort_order="1")]),
+            "item sort_order",
+        ),
+        (
+            replace(
+                draft,
+                categories=[replace(category, expected_locations=["资格审查", 1])],
+            ),
+            "category expected_locations",
+        ),
+        (
+            replace(draft, items=[replace(item, retrieval_hints=["营业执照", False])]),
+            "item retrieval_hints",
+        ),
+        (
+            replace(draft, items=[replace(item, admin_config_refs=[True])]),
+            "item admin_config_refs",
+        ),
+        (
+            replace(
+                draft,
+                items=[
+                    replace(
+                        item,
+                        source_references=[{**source_reference, "start": True}],
+                    )
+                ],
+            ),
+            "source start",
+        ),
+        (
+            replace(
+                draft,
+                items=[
+                    replace(
+                        item,
+                        compliance_rules={"satisfied": 1},
+                    )
+                ],
+            ),
+            "item compliance_rules",
+        ),
+        (
+            replace(
+                draft,
+                items=[
+                    replace(
+                        item,
+                        source_references=[
+                            {**source_reference, "synthetic": "false"}
+                        ],
+                    )
+                ],
+            ),
+            "source synthetic",
+        ),
+        (replace(draft, raw_response=[]), "raw_response"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_index", range(9))
+async def test_invalid_field_types_raise_validation_errors(
+    client, tmp_path, case_index
+):
+    del client
+    from app.services.checklist_service import (
+        ChecklistService,
+        ChecklistValidationError,
+    )
+
+    tender_markdown = await create_task_source(tmp_path)
+    draft, expected_field = invalid_field_type_cases(tender_markdown)[case_index]
+
+    with pytest.raises(ChecklistValidationError, match=expected_field):
+        await ChecklistService(StaticAgent(draft)).generate_for_task("task-checklist")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case_index", range(7))
 async def test_invalid_drafts_fail_cleanly(client, tmp_path, case_index):
