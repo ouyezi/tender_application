@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -25,6 +28,40 @@ def ensure_artifact_dirs(task_id: str) -> Path:
 def _safe_name(name: str) -> str:
     base = Path(name).name
     return re.sub(r"[^\w.\u4e00-\u9fff\-]+", "_", base)[:180] or "file"
+
+
+def write_checklist_json(
+    task_id: str,
+    filename: str,
+    payload: dict[str, Any],
+) -> Path:
+    destination = ensure_artifact_dirs(task_id) / "json" / _safe_name(filename)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            json.dump(
+                payload,
+                temporary,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            temporary.write("\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        temporary_path.replace(destination)
+        return destination
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def move_into_document(task_id: str, src: Path, *, file_id: str, original_name: str) -> Path:
