@@ -1,0 +1,366 @@
+{
+  "agent": {
+    "id": "agt_19641944",
+    "code": "agent_043",
+    "zhName": "招标文件解读助手",
+    "enName": "tender_doc_interpreter",
+    "description": "阅读招标文件全文，结合项目背景与额外解读要求，结构化提取项目基础信息、投标人资格（区分实质性要求）、全部废标条款、评标评分细则、采购需求（标记★强制条款）、合同要点、投标文件格式组成，输出解读报告，支撑标书目录生成、标书编制与投标合规诊断。",
+    "publishedVersion": 1,
+    "publishedAt": "2026-07-17T14:14:48+08:00",
+    "createdAt": "2026-07-17T14:14:15+08:00"
+  },
+  "application": {
+    "id": "app_f335e965",
+    "name": "招标文件解读",
+    "enName": "tender_doc_interpreter_app",
+    "agentId": "agt_19641944",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 180000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "published",
+    "publishedAt": "2026-07-17T14:14:48+08:00"
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "tender_doc_interpreter_app",
+    "requiredInputs": [
+      "tender_text"
+    ],
+    "optionalInputs": [
+      "project_background",
+      "interpretation_requirements"
+    ]
+  },
+  "model": {
+    "modelId": "mdl_544a969b",
+    "modelName": "qwen3.7-max",
+    "temperature": 0.3,
+    "thinking": true
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_tender_text",
+        "name": "tender_text",
+        "description": "招标文件全文文本",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_project_background",
+        "name": "project_background",
+        "description": "项目背景与已知约束",
+        "type": "string",
+        "required": false,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_interpretation_requirements",
+        "name": "interpretation_requirements",
+        "description": "额外解读要求（重点章节、行业口径等）",
+        "type": "string",
+        "required": false,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": [
+      {
+        "id": "f_report_markdown",
+        "name": "report_markdown",
+        "description": "完整解读报告（Markdown）",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_project_basic_info",
+        "name": "project_basic_info",
+        "description": "项目基础信息（名称、编号、招标人、代理、预算/控制价、地点、工期/服务期、关键时间节点等）",
+        "type": "object",
+        "required": true,
+        "children": [
+          {
+            "id": "f_pbi_name",
+            "name": "project_name",
+            "description": "项目名称",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pbi_code",
+            "name": "project_code",
+            "description": "项目/招标编号",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pbi_tenderer",
+            "name": "tenderer",
+            "description": "招标人",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pbi_agency",
+            "name": "agency",
+            "description": "招标代理",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pbi_budget",
+            "name": "budget_or_control_price",
+            "description": "预算或最高限价/控制价",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pbi_location",
+            "name": "location",
+            "description": "项目地点",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pbi_period",
+            "name": "period",
+            "description": "工期或服务期",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pbi_deadlines",
+            "name": "key_deadlines",
+            "description": "关键时间节点摘要",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pbi_other",
+            "name": "other",
+            "description": "其他基础信息摘要",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          }
+        ],
+        "itemType": null
+      },
+      {
+        "id": "f_bidder_qualifications",
+        "name": "bidder_qualifications",
+        "description": "投标人资格要求列表",
+        "type": "array",
+        "required": true,
+        "children": [
+          {
+            "id": "f_bq_req",
+            "name": "requirement",
+            "description": "资格要求内容",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_bq_sub",
+            "name": "is_substantive",
+            "description": "是否实质性要求",
+            "type": "boolean",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_bq_ref",
+            "name": "source_ref",
+            "description": "条款出处",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          }
+        ],
+        "itemType": "object"
+      },
+      {
+        "id": "f_rejection_clauses",
+        "name": "rejection_clauses",
+        "description": "全部废标/否决条款",
+        "type": "array",
+        "required": true,
+        "children": [
+          {
+            "id": "f_rc_clause",
+            "name": "clause",
+            "description": "废标/否决条款内容",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_rc_cat",
+            "name": "category",
+            "description": "类别（形式/实质/其他）",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_rc_ref",
+            "name": "source_ref",
+            "description": "条款出处",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          }
+        ],
+        "itemType": "object"
+      },
+      {
+        "id": "f_evaluation_rules",
+        "name": "evaluation_rules",
+        "description": "评标办法与评分细则",
+        "type": "object",
+        "required": true,
+        "children": [
+          {
+            "id": "f_er_method",
+            "name": "method",
+            "description": "评标方法类型",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_er_weights",
+            "name": "score_weights",
+            "description": "分项权重摘要",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_er_criteria",
+            "name": "scoring_criteria",
+            "description": "评分标准摘要",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_er_notes",
+            "name": "notes",
+            "description": "其他评标要点",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          }
+        ],
+        "itemType": null
+      },
+      {
+        "id": "f_procurement_requirements",
+        "name": "procurement_requirements",
+        "description": "采购需求列表",
+        "type": "array",
+        "required": true,
+        "children": [
+          {
+            "id": "f_pr_item",
+            "name": "item",
+            "description": "采购需求内容",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pr_star",
+            "name": "is_mandatory_star",
+            "description": "是否★强制条款",
+            "type": "boolean",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_pr_ref",
+            "name": "source_ref",
+            "description": "条款出处",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          }
+        ],
+        "itemType": "object"
+      },
+      {
+        "id": "f_contract_highlights",
+        "name": "contract_highlights",
+        "description": "合同要点列表",
+        "type": "array",
+        "required": true,
+        "children": null,
+        "itemType": "string"
+      },
+      {
+        "id": "f_bid_document_structure",
+        "name": "bid_document_structure",
+        "description": "投标文件格式/组成（章节目录级）",
+        "type": "array",
+        "required": true,
+        "children": null,
+        "itemType": "string"
+      },
+      {
+        "id": "f_risks_and_notes",
+        "name": "risks_and_notes",
+        "description": "风险提示与编制注意事项",
+        "type": "array",
+        "required": false,
+        "children": null,
+        "itemType": "string"
+      }
+    ]
+  }
+}
