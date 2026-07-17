@@ -144,6 +144,7 @@ async def test_precise_search_merges_channels_and_reranks(
     assert any(
         "退款" in hit.text or "无理由" in hit.text for hit in result.items
     )
+    assert all(hit.segment_level == "large" for hit in result.items)
 
 
 @pytest.mark.asyncio

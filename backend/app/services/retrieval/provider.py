@@ -383,11 +383,19 @@ async def _precise_search(
         if chunk.segment_level == "large"
     }
 
-    expanded = await _expand_fine_to_large(
-        session, task_id, fine_chunks, large_by_node
-    )
-    expanded_by_id = {chunk.chunk_id: chunk for chunk in expanded}
-    fine_ids = {chunk.chunk_id for chunk in fine_chunks}
+    fine_to_expanded: dict[str, KnowledgeChunk] = {}
+    for fine in fine_chunks:
+        expanded: KnowledgeChunk | None = None
+        for anc_id in _parse_json_list(fine.ancestor_node_ids):
+            large = large_by_node.get(anc_id)
+            if large is not None:
+                expanded = large
+                break
+        if expanded is None:
+            large = large_by_node.get(fine.node_id)
+            if large is not None:
+                expanded = large
+        fine_to_expanded[fine.chunk_id] = expanded or fine
 
     final_hits: list[RetrievalHit] = []
     seen: set[str] = set()
@@ -395,8 +403,8 @@ async def _precise_search(
         chunk = chunk_by_id.get(hit.chunk_id)
         if chunk is None:
             continue
-        if chunk.chunk_id in fine_ids and chunk.chunk_id in expanded_by_id:
-            chunk = expanded_by_id[chunk.chunk_id]
+        if chunk.segment_level == "fine":
+            chunk = fine_to_expanded.get(chunk.chunk_id, chunk)
         if chunk.chunk_id in seen:
             continue
         seen.add(chunk.chunk_id)
