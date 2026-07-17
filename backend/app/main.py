@@ -20,6 +20,9 @@ async def lifespan(app: FastAPI):
     await seed_configs_if_empty()
     await recover_interrupted_tasks()
     await recover_interrupted_parse_jobs()
+    from app.services.checklist_service import recover_checklist_publications
+
+    await recover_checklist_publications()
     from app.services import parse_scheduler
 
     await parse_scheduler.kick()

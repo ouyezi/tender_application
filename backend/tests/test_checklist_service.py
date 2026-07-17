@@ -918,3 +918,141 @@ async def test_artifact_promotion_failure_compensates_published_database(
         artifact.REPORT_DIR / "task-checklist" / "staging"
     )
     assert not list(private_staging_dir.glob("*staged*"))
+
+
+@pytest.mark.asyncio
+async def test_process_interrupt_preserves_staged_for_publication_recovery(
+    client, tmp_path, monkeypatch
+):
+    del client
+    from app.services.checklist_service import ChecklistService
+
+    tender_markdown = await create_task_source(tmp_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "app.services.checklist_service.promote_staged_checklist_json",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                KeyboardInterrupt("simulated process interrupt")
+            ),
+        )
+        with pytest.raises(KeyboardInterrupt, match="simulated process interrupt"):
+            await ChecklistService(
+                StaticAgent(valid_draft(tender_markdown))
+            ).generate_for_task("task-checklist")
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+        categories = (await session.scalars(select(ChecklistCategory))).all()
+        items = (await session.scalars(select(ChecklistItem))).all()
+
+    public_path = (
+        artifact.artifact_root("task-checklist")
+        / "json"
+        / f"checklist-generation-{generation.id}.json"
+    )
+    private_staging_dir = (
+        artifact.REPORT_DIR / "task-checklist" / "staging"
+    )
+    staged_paths = list(private_staging_dir.glob("*staged*"))
+    assert generation.status == "succeeded"
+    assert task.current_checklist_generation_id == generation.id
+    assert categories
+    assert items
+    assert not public_path.exists()
+    assert len(staged_paths) == 1
+
+    from app.services.checklist_service import recover_checklist_publications
+
+    await recover_checklist_publications()
+
+    assert public_path.is_file()
+    assert not list(private_staging_dir.glob("*staged*"))
+    recovered_payload = json.loads(public_path.read_text(encoding="utf-8"))
+    assert recovered_payload["schema_version"] == "1"
+    assert recovered_payload["items"]
+
+
+@pytest.mark.asyncio
+async def test_recovery_ignores_failed_and_noncurrent_staged_files(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import recover_checklist_publications
+
+    await create_task_source(tmp_path, "failed-task")
+    await create_task_source(tmp_path, "noncurrent-task")
+    async with db.SessionLocal() as session:
+        failed = ChecklistGeneration(
+            task_id="failed-task",
+            status="failed",
+            input_hash="failed",
+        )
+        noncurrent = ChecklistGeneration(
+            task_id="noncurrent-task",
+            status="succeeded",
+            input_hash="noncurrent",
+        )
+        session.add_all([failed, noncurrent])
+        await session.flush()
+        failed_task = await session.get(DiagnosisTask, "failed-task")
+        failed_task.current_checklist_generation_id = failed.id
+        await session.commit()
+
+    payload = {"schema_version": "1", "categories": [], "items": []}
+    failed_staged = artifact.stage_checklist_json(
+        "failed-task",
+        f"checklist-generation-{failed.id}.json",
+        payload,
+    )
+    noncurrent_staged = artifact.stage_checklist_json(
+        "noncurrent-task",
+        f"checklist-generation-{noncurrent.id}.json",
+        payload,
+    )
+
+    await recover_checklist_publications()
+
+    assert failed_staged.is_file()
+    assert noncurrent_staged.is_file()
+    assert not artifact.checklist_json_path(
+        "failed-task",
+        f"checklist-generation-{failed.id}.json",
+    ).exists()
+    assert not artifact.checklist_json_path(
+        "noncurrent-task",
+        f"checklist-generation-{noncurrent.id}.json",
+    ).exists()
+
+
+@pytest.mark.asyncio
+async def test_recovery_removes_staged_when_formal_artifact_exists(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import (
+        ChecklistService,
+        recover_checklist_publications,
+    )
+
+    tender_markdown = await create_task_source(tmp_path)
+    generation_id = await ChecklistService(
+        StaticAgent(valid_draft(tender_markdown))
+    ).generate_for_task("task-checklist")
+    filename = f"checklist-generation-{generation_id}.json"
+    staged_path = artifact.stage_checklist_json(
+        "task-checklist",
+        filename,
+        {"schema_version": "stale", "categories": [], "items": []},
+    )
+
+    await recover_checklist_publications()
+
+    assert not staged_path.exists()
+    formal_payload = json.loads(
+        artifact.checklist_json_path(
+            "task-checklist",
+            filename,
+        ).read_text(encoding="utf-8")
+    )
+    assert formal_payload["schema_version"] == "1"

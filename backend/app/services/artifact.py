@@ -113,13 +113,28 @@ def stage_checklist_json(
     filename: str,
     payload: dict[str, Any],
 ) -> Path:
-    directory = REPORT_DIR / _safe_name(task_id) / "staging"
-    staged_name = f".{_safe_name(filename)}.staged"
-    return _atomic_write_json(directory, staged_name, payload)
+    destination = staged_checklist_path(task_id, filename)
+    return _atomic_write_json(
+        destination.parent,
+        destination.name,
+        payload,
+    )
 
 
 def checklist_json_path(task_id: str, filename: str) -> Path:
     return ensure_artifact_dirs(task_id) / "json" / _safe_name(filename)
+
+
+def staged_checklist_path(task_id: str, filename: str) -> Path:
+    directory = REPORT_DIR / _safe_name(task_id) / "staging"
+    return directory / f".{_safe_name(filename)}.staged"
+
+
+def remove_staged_checklist(staged_path: Path) -> None:
+    staged_path = Path(staged_path)
+    if staged_path.exists():
+        staged_path.unlink()
+        _fsync_directory(staged_path.parent)
 
 
 def promote_staged_checklist_json(
@@ -127,13 +142,13 @@ def promote_staged_checklist_json(
     staged_path: Path,
     filename: str,
 ) -> Path:
-    staging_directory = REPORT_DIR / _safe_name(task_id) / "staging"
+    expected_staged_path = staged_checklist_path(task_id, filename)
     staged_path = Path(staged_path)
-    if staged_path.parent.resolve() != staging_directory.resolve():
+    if staged_path.resolve() != expected_staged_path.resolve():
         raise ValueError("staged checklist path is outside private staging directory")
     destination = checklist_json_path(task_id, filename)
     os.replace(staged_path, destination)
-    _fsync_directory(staging_directory)
+    _fsync_directory(expected_staged_path.parent)
     _fsync_directory(destination.parent)
     return destination
 
