@@ -282,22 +282,17 @@ async def test_retry_checklist_generates_report_end_to_end(client, tmp_path):
     response = await client.post("/api/tasks/T-CHECKLIST-API/checklist/retry")
 
     assert response.status_code == 202
-    for _ in range(100):
-        report = await client.get("/api/tasks/T-CHECKLIST-API/checklist")
-        if report.status_code == 200:
-            break
-        await asyncio.sleep(0.01)
-    assert report.status_code == 200
-    await asyncio.wait_for(
-        scheduler._get_control("T-CHECKLIST-API").done_event.wait(),
-        timeout=5,
-    )
-    async with db.SessionLocal() as session:
-        task = await session.get(DiagnosisTask, "T-CHECKLIST-API")
-    assert task.current_checklist_generation_id is not None
-    assert task.status == "diagnosing"
-    assert task.error_message is None
-    assert task.finished_at is None
+    status = await scheduler.wait_for_terminal("T-CHECKLIST-API", timeout=10)
+    assert status == "completed"
+
+    detail = (await client.get("/api/tasks/T-CHECKLIST-API")).json()
+    assert detail["current_checklist_generation_id"] is not None
+    assert detail["progress_done"] == detail["progress_total"]
+    assert detail["progress_total"] > 0
+    assert len(detail["results"]) == detail["progress_total"]
+    assert all(result["checklist_item_id"] for result in detail["results"])
+    assert detail["error_message"] is None
+    assert detail["failure_stage"] is None
 
 
 @pytest.mark.asyncio
@@ -328,6 +323,7 @@ async def test_retry_checklist_agent_failure_marks_task_failed_safely(
         task = await session.get(DiagnosisTask, "T-CHECKLIST-API")
     assert task.current_checklist_generation_id is None
     assert task.error_message == "checklist_generation_failed"
+    assert task.failure_stage == "checklist_generation"
 
 
 @pytest.mark.asyncio
@@ -345,17 +341,16 @@ async def test_scheduler_retry_prepares_state_and_starts_task(
         await session.commit()
 
     await scheduler.retry_checklist("T-CHECKLIST-API")
-    await asyncio.wait_for(
-        scheduler._get_control("T-CHECKLIST-API").done_event.wait(),
-        timeout=5,
-    )
+    status = await scheduler.wait_for_terminal("T-CHECKLIST-API", timeout=10)
+    assert status == "completed"
 
     async with db.SessionLocal() as session:
         task = await session.get(DiagnosisTask, "T-CHECKLIST-API")
-    assert task.status == "diagnosing"
     assert task.current_checklist_generation_id is not None
     assert task.error_message is None
-    assert task.finished_at is None
+    assert task.failure_stage is None
+    assert task.progress_done == task.progress_total
+    assert task.progress_total > 0
 
 
 def test_result_out_defaults_new_fields_for_legacy_rows():

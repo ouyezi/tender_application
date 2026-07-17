@@ -21,9 +21,11 @@ from app.services.checklist_service import (
     ChecklistValidationError,
     TenderParseBlockedError,
     assert_batch_complete,
+    failure_stage_for_error,
     get_report,
     wait_for_tender_parse_ready,
 )
+from app.services.checklist_context import ChecklistInputError
 
 
 class SchedulerConflict(Exception):
@@ -168,30 +170,14 @@ async def _run_checklist_retry(task_id: str) -> None:
                 return
             if task.current_checklist_generation_id is None:
                 raise RuntimeError("checklist_generation_missing")
-            task.status = "diagnosing"
-            task.error_message = None
-            task.failure_stage = None
-            task.finished_at = None
-            task.updated_at = utcnow()
-            await session.commit()
+
+        await _complete_from_diagnosis(task_id)
     except asyncio.CancelledError:
         raise
-    except ChecklistValidationError:
-        await _set_failure_stage(task_id, "checklist_validation")
-    except Exception:
-        async with database.SessionLocal() as session:
-            task = await session.get(DiagnosisTask, task_id)
-            if task is not None and task.status not in TERMINAL_STATUSES:
-                task.status = "failed"
-                task.error_message = "checklist_generation_failed"
-                task.failure_stage = "checklist_generation"
-                task.finished_at = utcnow()
-                task.updated_at = utcnow()
-                await session.commit()
-            elif task is not None and task.failure_stage is None:
-                task.failure_stage = "checklist_generation"
-                task.updated_at = utcnow()
-                await session.commit()
+    except (ChecklistValidationError, ChecklistInputError, TenderParseBlockedError) as exc:
+        await _handle_checklist_failure(task_id, exc)
+    except Exception as exc:
+        await _handle_checklist_failure(task_id, exc)
     finally:
         ctrl.done_event.set()
 
@@ -326,6 +312,57 @@ async def _set_failure_stage(task_id: str, failure_stage: str) -> None:
         await session.commit()
 
 
+async def _ensure_failure_stage(task_id: str, failure_stage: str) -> None:
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            return
+        if task.failure_stage != failure_stage:
+            task.failure_stage = failure_stage
+            task.updated_at = utcnow()
+            await session.commit()
+
+
+def _is_tender_parse_error(exc: BaseException) -> bool:
+    if isinstance(exc, TenderParseBlockedError):
+        return True
+    if isinstance(exc, ChecklistInputError):
+        message = str(exc)
+        return message.startswith("tender_parse_") or message in {
+            "tender_parse_missing",
+            "tender_file_task_mismatch",
+        }
+    return False
+
+
+async def _handle_checklist_failure(task_id: str, exc: BaseException) -> None:
+    if _is_tender_parse_error(exc):
+        await _mark_failed(task_id, str(exc), "tender_parse")
+        return
+    if isinstance(exc, ChecklistValidationError):
+        await _ensure_failure_stage(task_id, "checklist_validation")
+        return
+    stage = failure_stage_for_error(
+        exc if isinstance(exc, Exception) else None,
+        public_message=str(exc),
+    )
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            return
+        if task.status not in TERMINAL_STATUSES:
+            task.status = "failed"
+            task.error_message = str(exc)[:240]
+            task.failure_stage = stage
+            task.finished_at = utcnow()
+            task.updated_at = utcnow()
+            await session.commit()
+        elif task.failure_stage is None:
+            task.failure_stage = stage
+            task.updated_at = utcnow()
+            await session.commit()
+
+
 async def _mark_failed(
     task_id: str,
     error_message: str,
@@ -429,6 +466,47 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
     return True
 
 
+async def _complete_from_diagnosis(task_id: str) -> None:
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            return
+        if task.status in TERMINAL_STATUSES:
+            return
+        if task.status != "paused":
+            task.status = "diagnosing"
+            task.error_message = None
+            task.failure_stage = None
+            task.finished_at = None
+            task.updated_at = utcnow()
+            await session.commit()
+
+    if not await _run_diagnosis_phase(task_id):
+        return
+
+    if _should_stop(task_id):
+        await _mark_stopped(task_id)
+        return
+
+    md_path, docx_path = await report.generate_and_save_reports(task_id)
+
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            return
+        if task.status in TERMINAL_STATUSES:
+            return
+        if _should_stop(task_id):
+            task.status = "stopped"
+        else:
+            task.status = "completed"
+            task.report_md_path = md_path
+            task.report_docx_path = docx_path
+        task.finished_at = utcnow()
+        task.updated_at = utcnow()
+        await session.commit()
+
+
 async def _run(task_id: str) -> None:
     ctrl = _get_control(task_id)
     try:
@@ -513,57 +591,22 @@ async def _run(task_id: str) -> None:
                 await ChecklistService(agent=MockChecklistAgent()).generate_for_task(
                     task_id
                 )
-            except ChecklistValidationError:
-                await _set_failure_stage(task_id, "checklist_validation")
+            except (
+                ChecklistValidationError,
+                ChecklistInputError,
+                TenderParseBlockedError,
+            ) as exc:
+                await _handle_checklist_failure(task_id, exc)
                 return
-            except Exception:
-                async with database.SessionLocal() as session:
-                    task = await session.get(DiagnosisTask, task_id)
-                    if task is not None and task.failure_stage is None:
-                        task.failure_stage = "checklist_generation"
-                        task.updated_at = utcnow()
-                        await session.commit()
+            except Exception as exc:
+                await _handle_checklist_failure(task_id, exc)
                 return
 
             if _should_stop(task_id):
                 await _mark_stopped(task_id)
                 return
 
-        async with database.SessionLocal() as session:
-            task = await session.get(DiagnosisTask, task_id)
-            if task is None:
-                return
-            if task.status in TERMINAL_STATUSES:
-                return
-            if task.status != "paused":
-                task.status = "diagnosing"
-                task.updated_at = utcnow()
-                await session.commit()
-
-        if not await _run_diagnosis_phase(task_id):
-            return
-
-        if _should_stop(task_id):
-            await _mark_stopped(task_id)
-            return
-
-        md_path, docx_path = await report.generate_and_save_reports(task_id)
-
-        async with database.SessionLocal() as session:
-            task = await session.get(DiagnosisTask, task_id)
-            if task is None:
-                return
-            if task.status in TERMINAL_STATUSES:
-                return
-            if _should_stop(task_id):
-                task.status = "stopped"
-            else:
-                task.status = "completed"
-                task.report_md_path = md_path
-                task.report_docx_path = docx_path
-            task.finished_at = utcnow()
-            task.updated_at = utcnow()
-            await session.commit()
+        await _complete_from_diagnosis(task_id)
     except asyncio.CancelledError:
         raise
     except Exception as exc:

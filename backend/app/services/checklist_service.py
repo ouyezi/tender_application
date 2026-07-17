@@ -123,6 +123,25 @@ class TenderParseBlockedError(ChecklistInputError):
     """Raised when tender parse failed, is partial, or timed out while waiting."""
 
 
+def failure_stage_for_error(
+    error: Exception | None,
+    *,
+    public_message: str | None = None,
+) -> str:
+    if isinstance(error, ChecklistValidationError):
+        return "checklist_validation"
+    if isinstance(error, ChecklistInputError):
+        message = str(error)
+        if message.startswith("tender_parse_") or message in {
+            "tender_parse_missing",
+            "tender_file_task_mismatch",
+        }:
+            return "tender_parse"
+    if public_message == "checklist_validation_failed":
+        return "checklist_validation"
+    return "checklist_generation"
+
+
 async def wait_for_tender_parse_ready(
     task_id: str,
     timeout: float = 300.0,
@@ -909,6 +928,7 @@ class ChecklistService:
                         task.current_checklist_generation_id = None
                     task.status = "failed"
                     task.error_message = "checklist_generation_failed"
+                    task.failure_stage = "checklist_generation"
                     task.progress_done = 0
                     task.progress_total = 0
                     task.finished_at = now
@@ -969,5 +989,9 @@ class ChecklistService:
                         task.current_checklist_generation_id = None
                     task.status = "failed"
                     task.error_message = public_message
+                    task.failure_stage = failure_stage_for_error(
+                        error,
+                        public_message=public_message,
+                    )
                     task.finished_at = now
                     task.updated_at = now
