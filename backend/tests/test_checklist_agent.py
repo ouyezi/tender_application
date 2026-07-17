@@ -22,10 +22,11 @@ def _context(*segments: str) -> PromptContext:
 @pytest.mark.asyncio
 async def test_generate_returns_complete_schema_and_valid_references():
     agent: ChecklistAgent = MockChecklistAgent()
+    segment = "# 营业执照要求\n投标人须提供有效营业执照复印件。"
 
     draft = await agent.generate(
         task_id="TASK-1",
-        context=_context("# 营业执照要求\n投标人须提供有效营业执照复印件。"),
+        context=_context(segment),
     )
 
     assert draft.schema_version == "1"
@@ -59,8 +60,10 @@ async def test_generate_returns_complete_schema_and_valid_references():
         }
         for reference in item.source_references:
             assert {"section", "start", "end"} <= reference.keys()
+            assert reference["coordinate_space"] == "segment"
             assert reference["start"] >= 0
             assert reference["end"] > reference["start"]
+            assert segment[reference["start"] : reference["end"]] == item.requirement
 
 
 @pytest.mark.asyncio
@@ -74,19 +77,79 @@ async def test_generate_records_same_prefix_for_every_segment():
 
 
 @pytest.mark.asyncio
-async def test_generate_deduplicates_repeated_overlap_titles():
+async def test_generate_deduplicates_identical_overlap_candidates():
     agent = MockChecklistAgent()
     context = _context(
         "# 资格要求\n投标人须具备有效资质。",
-        "# 资格要求\n投标人须具备有效资质。\n补充说明。",
+        "# 资格要求\n投标人须具备有效资质。",
     )
 
     draft = await agent.generate(task_id="TASK-3", context=context)
 
-    normalized_titles = {
-        "".join(title.split()).casefold() for title in (item.title for item in draft.items)
+    assert len(draft.items) == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_preserves_same_title_with_different_requirements():
+    agent = MockChecklistAgent()
+    context = _context(
+        "# 资格要求\n投标人须具备甲级资质。",
+        "# 资格要求\n项目负责人须具备注册证书。",
+    )
+
+    draft = await agent.generate(task_id="TASK-SAME-TITLE", context=context)
+    repeated = await MockChecklistAgent().generate(
+        task_id="TASK-SAME-TITLE",
+        context=context,
+    )
+
+    assert [item.title for item in draft.items] == ["资格要求", "资格要求"]
+    assert {item.requirement for item in draft.items} == {
+        "投标人须具备甲级资质。",
+        "项目负责人须具备注册证书。",
     }
-    assert len(draft.items) == len(normalized_titles) == 1
+    assert len({item.id for item in draft.items}) == 2
+    assert [item.id for item in draft.items] == [item.id for item in repeated.items]
+
+
+@pytest.mark.asyncio
+async def test_generate_extracts_all_titled_sections_from_one_segment():
+    agent = MockChecklistAgent()
+    segment = """# 资格审查
+须提交营业执照和资质证书。
+# 评分办法
+企业业绩最高得分为十分。
+# 技术方案
+技术参数须逐项响应。
+"""
+
+    draft = await agent.generate(
+        task_id="TASK-MULTI-SECTION",
+        context=_context(segment),
+    )
+
+    assert {category.name for category in draft.categories} == {
+        "资格证明材料",
+        "商务评分材料",
+        "技术响应材料",
+    }
+    assert {item.title for item in draft.items} == {"资格审查", "评分办法", "技术方案"}
+    assert len(draft.items) == 3
+
+
+@pytest.mark.asyncio
+async def test_generate_extracts_multiple_untitled_sentences():
+    agent = MockChecklistAgent()
+
+    draft = await agent.generate(
+        task_id="TASK-UNTITLED",
+        context=_context("投标文件须密封提交。装订方式须符合规定。"),
+    )
+
+    assert [item.requirement for item in draft.items] == [
+        "投标文件须密封提交。",
+        "装订方式须符合规定。",
+    ]
 
 
 @pytest.mark.asyncio
@@ -141,7 +204,15 @@ async def test_generate_empty_body_returns_valid_fallback_item():
     assert draft.categories
     assert len(draft.items) == 1
     assert draft.items[0].title == "全文完整性检查"
-    assert draft.items[0].source_references[0]["end"] > 0
+    reference = draft.items[0].source_references[0]
+    assert reference == {
+        "section": "全文",
+        "start": 0,
+        "end": 1,
+        "segment_index": 0,
+        "coordinate_space": "synthetic",
+        "synthetic": True,
+    }
 
 
 @pytest.mark.asyncio

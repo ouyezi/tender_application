@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from app.engine.base import (
@@ -40,6 +40,19 @@ _CATEGORY_DEFINITIONS = {
 }
 
 
+@dataclass(frozen=True)
+class _Candidate:
+    title: str
+    requirement: str
+    section: str
+    start: int
+    end: int
+    segment_index: int
+    classification_text: str
+    coordinate_space: str = "segment"
+    synthetic: bool = False
+
+
 class MockChecklistAgent:
     agent_type = "mock"
     agent_version = "1"
@@ -55,25 +68,32 @@ class MockChecklistAgent:
     ) -> ChecklistDraft:
         del task_id
         self.prompt_prefixes = []
-        candidates: list[dict[str, Any]] = []
-        seen_titles: set[str] = set()
+        candidates: list[_Candidate] = []
+        seen_candidates: set[tuple[str, str]] = set()
 
         for segment_index, call in enumerate(context.calls):
             self.prompt_prefixes.append(call.stable_prefix)
-            candidate = self._extract_candidate(call.tender_segment, segment_index)
-            normalized_title = _TITLE_NORMALIZER.sub("", candidate["title"]).casefold()
-            if normalized_title in seen_titles:
-                continue
-            seen_titles.add(normalized_title)
-            candidates.append(candidate)
+            for candidate in self._extract_candidates(
+                call.tender_segment,
+                segment_index,
+            ):
+                deduplication_key = (
+                    self._normalize(candidate.title),
+                    self._normalize(candidate.requirement),
+                )
+                if deduplication_key in seen_candidates:
+                    continue
+                seen_candidates.add(deduplication_key)
+                candidates.append(candidate)
 
         if not candidates:
-            candidates.append(self._extract_candidate("", 0))
+            candidates.append(self._synthetic_candidate(0))
 
         category_names: list[str] = []
+        candidate_categories: list[tuple[_Candidate, str]] = []
         for candidate in candidates:
-            category_name = self._category_name(candidate["classification_text"])
-            candidate["category_name"] = category_name
+            category_name = self._category_name(candidate.classification_text)
+            candidate_categories.append((candidate, category_name))
             if category_name not in category_names:
                 category_names.append(category_name)
 
@@ -95,8 +115,11 @@ class MockChecklistAgent:
             for index, name in enumerate(category_names, start=1)
         ]
         items = [
-            self._build_item(candidate, index, category_ids[candidate["category_name"]])
-            for index, candidate in enumerate(candidates, start=1)
+            self._build_item(candidate, index, category_ids[category_name])
+            for index, (candidate, category_name) in enumerate(
+                candidate_categories,
+                start=1,
+            )
         ]
         raw_response = {
             "schema_version": "1",
@@ -111,52 +134,119 @@ class MockChecklistAgent:
         )
 
     @staticmethod
-    def _extract_candidate(segment: str, segment_index: int) -> dict[str, Any]:
-        heading_match = _HEADING_PATTERN.search(segment)
+    def _normalize(value: str) -> str:
+        return _TITLE_NORMALIZER.sub("", value).casefold()
+
+    @classmethod
+    def _extract_candidates(
+        cls,
+        segment: str,
+        segment_index: int,
+    ) -> list[_Candidate]:
         if not segment.strip():
-            return {
-                "title": "全文完整性检查",
-                "requirement": "确认招标文件正文完整可用，避免遗漏应响应的要求。",
-                "section": "全文",
-                "start": 0,
-                "end": 1,
-                "segment_index": segment_index,
-                "classification_text": "",
-            }
+            return [cls._synthetic_candidate(segment_index)]
 
-        title = heading_match.group(1).strip() if heading_match else ""
-        body_start = heading_match.end() if heading_match else 0
-        body = segment[body_start:]
-        sentence_match = next(
-            (
-                match
-                for match in _SENTENCE_PATTERN.finditer(body)
-                if match.group().strip()
-            ),
-            None,
+        heading_matches = list(_HEADING_PATTERN.finditer(segment))
+        if not heading_matches:
+            return cls._body_candidates(
+                segment,
+                0,
+                len(segment),
+                segment_index,
+                title=None,
+            )
+
+        candidates = cls._body_candidates(
+            segment,
+            0,
+            heading_matches[0].start(),
+            segment_index,
+            title=None,
         )
-        if sentence_match:
-            requirement = sentence_match.group().strip()
-            start = body_start + sentence_match.start()
-            while start < len(segment) and segment[start].isspace():
-                start += 1
-            end = start + len(requirement)
-        else:
-            requirement = title or segment.strip()
-            start = heading_match.start(1) if heading_match else segment.index(requirement)
-            end = start + len(requirement)
+        for index, heading_match in enumerate(heading_matches):
+            title = heading_match.group(1).strip()
+            body_end = (
+                heading_matches[index + 1].start()
+                if index + 1 < len(heading_matches)
+                else len(segment)
+            )
+            section_candidates = cls._body_candidates(
+                segment,
+                heading_match.end(),
+                body_end,
+                segment_index,
+                title=title,
+            )
+            if not section_candidates:
+                start = heading_match.start(1)
+                end = heading_match.end(1)
+                section_candidates.append(
+                    _Candidate(
+                        title=title,
+                        requirement=segment[start:end],
+                        section=title,
+                        start=start,
+                        end=end,
+                        segment_index=segment_index,
+                        classification_text=title,
+                    )
+                )
+            candidates.extend(section_candidates)
+        return candidates
 
-        if not title:
-            title = requirement.rstrip("。！？!?")[:40] or "全文完整性检查"
-        return {
-            "title": title,
-            "requirement": requirement,
-            "section": title,
-            "start": start,
-            "end": max(start + 1, end),
-            "segment_index": segment_index,
-            "classification_text": f"{title} {requirement}",
-        }
+    @staticmethod
+    def _body_candidates(
+        segment: str,
+        body_start: int,
+        body_end: int,
+        segment_index: int,
+        *,
+        title: str | None,
+    ) -> list[_Candidate]:
+        candidates: list[_Candidate] = []
+        for sentence_match in _SENTENCE_PATTERN.finditer(
+            segment,
+            body_start,
+            body_end,
+        ):
+            raw_sentence = sentence_match.group()
+            requirement = raw_sentence.strip()
+            if not requirement:
+                continue
+            leading_whitespace = len(raw_sentence) - len(raw_sentence.lstrip())
+            start = sentence_match.start() + leading_whitespace
+            end = start + len(requirement)
+            candidate_title = (
+                title
+                or requirement.rstrip("。！？!?")[:40]
+                or "全文完整性检查"
+            )
+            candidates.append(
+                _Candidate(
+                    title=candidate_title,
+                    requirement=requirement,
+                    section=title or "正文",
+                    start=start,
+                    end=end,
+                    segment_index=segment_index,
+                    classification_text=f"{candidate_title} {requirement}",
+                )
+            )
+        return candidates
+
+    @staticmethod
+    def _synthetic_candidate(segment_index: int) -> _Candidate:
+        return _Candidate(
+            title="全文完整性检查",
+            requirement="确认招标文件正文完整可用，避免遗漏应响应的要求。",
+            section="全文",
+            start=0,
+            end=1,
+            segment_index=segment_index,
+            classification_text="",
+            coordinate_space="synthetic",
+            synthetic=True,
+        )
 
     @staticmethod
     def _category_name(text: str) -> str:
@@ -170,12 +260,21 @@ class MockChecklistAgent:
 
     @staticmethod
     def _build_item(
-        candidate: dict[str, Any],
+        candidate: _Candidate,
         index: int,
         category_id: str,
     ) -> ChecklistItemDraft:
-        title = candidate["title"]
-        requirement = candidate["requirement"]
+        title = candidate.title
+        requirement = candidate.requirement
+        source_reference: dict[str, Any] = {
+            "section": candidate.section,
+            "start": candidate.start,
+            "end": candidate.end,
+            "segment_index": candidate.segment_index,
+            "coordinate_space": candidate.coordinate_space,
+        }
+        if candidate.synthetic:
+            source_reference["synthetic"] = True
         return ChecklistItemDraft(
             id=f"item-{index:03d}",
             category_id=category_id,
@@ -183,14 +282,7 @@ class MockChecklistAgent:
             requirement=requirement,
             technique=f"检索并核对与“{title}”对应的投标响应及证明材料。",
             importance="high",
-            source_references=[
-                {
-                    "section": candidate["section"],
-                    "start": candidate["start"],
-                    "end": candidate["end"],
-                    "segment_index": candidate["segment_index"],
-                }
-            ],
+            source_references=[source_reference],
             retrieval_hints=[title, requirement],
             expected_evidence=[f"与“{title}”对应的完整响应或证明材料"],
             compliance_rules={
