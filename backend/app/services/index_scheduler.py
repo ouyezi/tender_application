@@ -16,17 +16,19 @@ from typing import Optional
 
 from sqlalchemy import select
 
+from app import config
 from app import db as database
-from app.config import UPLOAD_DIR
-from app.models import IndexJob, WorkspaceFile, utcnow
+from app.models import IndexJob, KnowledgeChunk, WorkspaceFile, utcnow
 from app.services.retrieval.enricher import MockChunkEnricher
 from app.services.retrieval.fts import rebuild_fts_for_file
 from app.services.retrieval.persist import (
     external_text_paths,
     invalidate_file_index,
+    load_chunk_text,
     purge_orphaned_text_files,
     write_segments,
 )
+from app.services.retrieval.vectors import VectorIndex, get_embedding_model
 from app.services.retrieval.segments import materialize_segments
 from app.services.retrieval.tags import load_tag_catalog
 
@@ -106,6 +108,43 @@ async def _loop() -> None:
             logger.exception("index_scheduler: unhandled error running job %s", job_id)
 
 
+async def _rebuild_vectors_for_file(
+    session,
+    task_id: str,
+    file_id: str,
+) -> None:
+    """Embed fine chunks and persist a per-file vector index."""
+    result = await session.execute(
+        select(KnowledgeChunk).where(
+            KnowledgeChunk.task_id == task_id,
+            KnowledgeChunk.file_id == file_id,
+            KnowledgeChunk.segment_level == "fine",
+        )
+    )
+    fine_chunks = result.scalars().all()
+    model = get_embedding_model()
+    vector_path = config.UPLOAD_DIR / task_id / "vectors" / file_id
+    index = VectorIndex(vector_path)
+
+    if not fine_chunks:
+        index.upsert([])
+        return
+
+    texts = [
+        f"{chunk.title} {load_chunk_text(chunk)}".strip()
+        for chunk in fine_chunks
+    ]
+    vectors = model.embed_many(texts)
+    index.upsert(
+        [
+            (chunk.chunk_id, vector)
+            for chunk, vector in zip(fine_chunks, vectors)
+        ]
+    )
+    for chunk in fine_chunks:
+        chunk.embedding_status = "ready"
+
+
 async def _claim_next_queued() -> Optional[int]:
     async with database.SessionLocal() as session:
         result = await session.execute(
@@ -158,7 +197,7 @@ async def _run_job(job_id: int) -> None:
         tree = json.loads(Path(tree_path).read_text(encoding="utf-8"))
         fine_chunks = json.loads(Path(chunks_path).read_text(encoding="utf-8"))
         segments = materialize_segments(markdown, tree, fine_chunks)
-        text_dir = UPLOAD_DIR / task_id / "index_text"
+        text_dir = config.UPLOAD_DIR / task_id / "index_text"
 
         new_text_paths = external_text_paths(segments, text_dir)
         async with database.SessionLocal() as session:
@@ -171,6 +210,7 @@ async def _run_job(job_id: int) -> None:
             old_text_paths = await invalidate_file_index(session, task_id, file_id)
             await write_segments(session, task_id, file_id, segments, text_dir)
             await rebuild_fts_for_file(session, task_id, file_id)
+            await _rebuild_vectors_for_file(session, task_id, file_id)
             job = await session.get(IndexJob, job_id)
             if job is not None:
                 job.status = "ready"
