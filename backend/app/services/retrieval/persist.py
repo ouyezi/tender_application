@@ -117,6 +117,7 @@ async def write_segments(
                 text_inline=text_inline,
                 child_chunk_ids=json.dumps(seg.child_chunk_ids, ensure_ascii=False),
                 source=seg.source,
+                index_status="ready",
             )
         )
 

@@ -18,6 +18,7 @@ from sqlalchemy import select
 from app import db as database
 from app.config import UPLOAD_DIR
 from app.models import IndexJob, WorkspaceFile, utcnow
+from app.services.retrieval.enricher import MockChunkEnricher
 from app.services.retrieval.persist import (
     external_text_paths,
     invalidate_file_index,
@@ -25,6 +26,7 @@ from app.services.retrieval.persist import (
     write_segments,
 )
 from app.services.retrieval.segments import materialize_segments
+from app.services.retrieval.tags import load_tag_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -158,12 +160,18 @@ async def _run_job(job_id: int) -> None:
 
         new_text_paths = external_text_paths(segments, text_dir)
         async with database.SessionLocal() as session:
+            catalog = await load_tag_catalog(session)
+            segments = await MockChunkEnricher().enrich_many(
+                task_id=task_id,
+                segments=segments,
+                catalog=catalog,
+            )
             old_text_paths = await invalidate_file_index(session, task_id, file_id)
             await write_segments(session, task_id, file_id, segments, text_dir)
             job = await session.get(IndexJob, job_id)
             if job is not None:
                 job.status = "ready"
-                job.stage = "segments"
+                job.stage = "enrich"
                 job.progress_done = len(segments)
                 job.progress_total = len(segments)
                 job.finished_at = utcnow()
