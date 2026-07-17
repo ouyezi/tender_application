@@ -154,7 +154,7 @@ async def _expand_fine_to_large(
 
     for fine in fine_chunks:
         expanded: KnowledgeChunk | None = None
-        for anc_id in reversed(_parse_json_list(fine.ancestor_node_ids)):
+        for anc_id in _parse_json_list(fine.ancestor_node_ids):
             large = large_by_node.get(anc_id)
             if large is not None:
                 expanded = large

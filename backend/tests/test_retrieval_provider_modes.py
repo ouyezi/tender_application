@@ -11,7 +11,10 @@ from sqlalchemy.pool import NullPool
 
 from app.db import init_db_on_connection
 from app.engine.retrieval_workspace import WorkspaceRetrievalProvider
-from app.models import DiagnosisTask, KnowledgeTag, WorkspaceFile
+from app.models import DiagnosisTask, KnowledgeChunk, KnowledgeTag, WorkspaceFile
+from app.services.retrieval.persist import load_chunk_text
+from app.services.retrieval.provider import _expand_fine_to_large
+from app.services.retrieval.segments import materialize_segments
 from app.services import artifact, index_scheduler
 from app.services.parse.chunk import chunk_from_tree
 from app.services.parse.tree import build_document_tree
@@ -244,6 +247,116 @@ async def test_precise_search_not_implemented(provider, indexed_bid_task):
     )
     assert result.mode == "precise_search"
     assert result.error == "not_implemented"
+
+
+@pytest.mark.asyncio
+async def test_expand_fine_to_large_picks_nearest_ancestor(db_session):
+    """3-level tree: fine leaf expands to nearest parent large, not root."""
+    md_text = (
+        "# 文档总述\n\n"
+        "总述段落。\n\n"
+        "## 技术方案\n\n"
+        "方案概述。\n\n"
+        "### 架构设计\n\n"
+        "架构正文甲。\n"
+    )
+    tree = build_document_tree(md_text)
+    fine_src = chunk_from_tree(md_text, tree)
+    segments = materialize_segments(md_text, tree, fine_src)
+
+    fines = [s for s in segments if s.segment_level == "fine"]
+    larges = {s.node_id: s for s in segments if s.segment_level == "large"}
+    assert len(larges) == 2
+
+    fine = next(s for s in fines if s.title_path[-1] == "架构设计")
+    root_large_seg = next(s for s in segments if s.segment_level == "large" and s.title == "文档总述")
+    nearest_large_seg = next(s for s in segments if s.segment_level == "large" and s.title == "技术方案")
+
+    assert fine.ancestor_node_ids[0] == nearest_large_seg.node_id
+    assert fine.ancestor_node_ids[1] == root_large_seg.node_id
+
+    def _as_chunk(seg):
+        return KnowledgeChunk(
+            task_id="T-UNIT",
+            file_id="funit",
+            chunk_id=seg.chunk_id,
+            node_id=seg.node_id,
+            ancestor_node_ids=json.dumps(seg.ancestor_node_ids, ensure_ascii=False),
+            segment_level=seg.segment_level,
+            title=seg.title,
+            child_chunk_ids=json.dumps(seg.child_chunk_ids, ensure_ascii=False),
+            text_inline=seg.text,
+            index_status="ready",
+        )
+
+    fine_chunk = _as_chunk(fine)
+    large_by_node = {
+        seg.node_id: _as_chunk(seg) for seg in segments if seg.segment_level == "large"
+    }
+
+    expanded = await _expand_fine_to_large(db_session, "T-UNIT", [fine_chunk], large_by_node)
+    assert len(expanded) == 1
+    assert expanded[0].chunk_id == nearest_large_seg.chunk_id
+    assert expanded[0].chunk_id != root_large_seg.chunk_id
+    assert expanded[0].title == "技术方案"
+    assert "架构正文甲" in load_chunk_text(expanded[0])
+    assert "总述段落。" not in load_chunk_text(expanded[0])
+
+
+@pytest.mark.asyncio
+async def test_collection_expands_to_nearest_large_not_root(provider, db_session):
+    """Collection on 3-level doc returns nearest large for tagged leaf, not root."""
+    task_id = "T-RETR-NEAR"
+    file_id = "fnear001"
+    md_text = (
+        "# 文档总述\n\n"
+        "总述段落。\n\n"
+        "## 技术方案\n\n"
+        "方案概述。\n\n"
+        "### 架构设计\n\n"
+        "架构正文甲。\n"
+    )
+    wf = await _write_parsed_file(
+        db_session,
+        task_id=task_id,
+        file_id=file_id,
+        label="投标文件",
+        md_text=md_text,
+    )
+    await _index_file(wf)
+
+    chunks = (
+        await db_session.execute(
+            select(KnowledgeChunk).where(KnowledgeChunk.file_id == file_id)
+        )
+    ).scalars().all()
+    larges = {c.title: c for c in chunks if c.segment_level == "large"}
+    root_large = larges["文档总述"]
+    nearest_large = larges["技术方案"]
+
+    # Only tag the deepest fine chunk so expansion path is exercised.
+    for chunk in chunks:
+        if chunk.segment_level == "fine" and chunk.title == "架构设计":
+            chunk.tags = json.dumps([{"name": "技术方案", "confidence": 0.9}])
+        elif chunk.segment_level == "large":
+            chunk.tags = json.dumps([])
+        else:
+            chunk.tags = json.dumps([])
+    await db_session.commit()
+
+    result = await provider.retrieve(
+        task_id=task_id,
+        content_source="collection",
+        content_target={"target_tags": ["技术方案"]},
+    )
+    assert result.error is None
+    assert len(result.items) == 1
+    hit = result.items[0]
+    assert hit.chunk_id == nearest_large.chunk_id
+    assert hit.chunk_id != root_large.chunk_id
+    assert hit.title == "技术方案"
+    assert "架构正文甲" in hit.text
+    assert "总述段落。" not in hit.text
 
 
 @pytest.mark.asyncio
