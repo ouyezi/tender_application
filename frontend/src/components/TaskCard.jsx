@@ -2,6 +2,7 @@ import { reportDocxUrl } from '../api'
 
 const STATUS_LABELS = {
   interpreting: '解读中',
+  generating_checklist: '生成检查项',
   diagnosing: '诊断中',
   running: '诊断中', // legacy
   paused: '已暂停',

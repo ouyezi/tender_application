@@ -4,6 +4,7 @@ import { listTasks, pauseTask, resumeTask, stopTask } from '../../api'
 
 const STATUS_LABELS = {
   interpreting: '解读中',
+  generating_checklist: '生成检查项',
   diagnosing: '诊断中',
   running: '诊断中', // legacy
   paused: '已暂停',
@@ -134,24 +135,28 @@ export default function AdminTasksPage() {
                       {formatDate(task.created_at)}
                     </td>
                     <td>
-                      <div className="progress-cell">
-                        <div
-                          className="progress-bar"
-                          role="progressbar"
-                          aria-valuenow={pct}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-label={`进度 ${done}/${total}`}
-                        >
+                      {status === 'generating_checklist' ? (
+                        <span className="progress-text">检查项生成中</span>
+                      ) : (
+                        <div className="progress-cell">
                           <div
-                            className="progress-bar-fill"
-                            style={{ width: `${pct}%` }}
-                          />
+                            className="progress-bar"
+                            role="progressbar"
+                            aria-valuenow={pct}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-label={`进度 ${done}/${total}`}
+                          >
+                            <div
+                              className="progress-bar-fill"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="progress-text">
+                            {done}/{total}
+                          </span>
                         </div>
-                        <span className="progress-text">
-                          {done}/{total}
-                        </span>
-                      </div>
+                      )}
                     </td>
                     <td>
                       <div className="admin-table-actions">

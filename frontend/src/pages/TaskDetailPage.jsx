@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { fileUrl, getTask, interpretHtmlUrl, reportDocxUrl } from '../api'
+import ChecklistReport from '../components/ChecklistReport'
 import MarkdownPreview from '../components/MarkdownPreview'
 import ResultTable from '../components/ResultTable'
 
 const STATUS_LABELS = {
   interpreting: '解读中',
+  generating_checklist: '生成检查项',
   diagnosing: '诊断中',
   running: '诊断中', // legacy
   paused: '已暂停',
@@ -14,7 +16,13 @@ const STATUS_LABELS = {
   failed: '失败',
 }
 
-const POLL_STATUSES = new Set(['interpreting', 'diagnosing', 'running', 'paused'])
+const POLL_STATUSES = new Set([
+  'interpreting',
+  'generating_checklist',
+  'diagnosing',
+  'running',
+  'paused',
+])
 
 export default function TaskDetailPage() {
   const { id } = useParams()
@@ -173,6 +181,15 @@ export default function TaskDetailPage() {
           <button
             type="button"
             role="tab"
+            aria-selected={reportTab === 'checklist'}
+            className={reportTab === 'checklist' ? 'report-tab active' : 'report-tab'}
+            onClick={() => setReportTab('checklist')}
+          >
+            检查项报告
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={reportTab === 'diagnosis'}
             className={reportTab === 'diagnosis' ? 'report-tab active' : 'report-tab'}
             onClick={() => setReportTab('diagnosis')}
@@ -193,8 +210,18 @@ export default function TaskDetailPage() {
           ) : (
             <p className="empty-state-hint">暂无解读报告</p>
           )
+        ) : reportTab === 'checklist' ? (
+          <ChecklistReport
+            taskId={task.id}
+            taskStatus={status}
+            failureStage={task.failure_stage}
+            errorMessage={task.error_message}
+            onRetryStarted={() => load(true)}
+          />
         ) : status === 'interpreting' ? (
-          <p className="report-pending">解读完成后开始诊断</p>
+          <p className="report-pending">解读完成后开始生成检查项</p>
+        ) : status === 'generating_checklist' ? (
+          <p className="report-pending">检查项生成中…</p>
         ) : (status === 'diagnosing' || status === 'running' || status === 'paused') &&
           !task.report_markdown ? (
           <p className="report-pending">诊断进行中…</p>
