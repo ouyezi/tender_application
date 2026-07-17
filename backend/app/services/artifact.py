@@ -30,14 +30,15 @@ def _safe_name(name: str) -> str:
     return re.sub(r"[^\w.\u4e00-\u9fff\-]+", "_", base)[:180] or "file"
 
 
-def serialize_checklist_json(payload: dict[str, Any]) -> str:
-    return json.dumps(
+def serialize_checklist_json(payload: dict[str, Any]) -> bytes:
+    serialized = json.dumps(
         payload,
         ensure_ascii=False,
         indent=2,
         sort_keys=True,
         allow_nan=False,
     )
+    return serialized.encode("utf-8")
 
 
 def write_checklist_json(
@@ -50,8 +51,7 @@ def write_checklist_json(
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
+            mode="wb",
             dir=destination.parent,
             prefix=f".{destination.name}.",
             suffix=".tmp",
@@ -59,7 +59,7 @@ def write_checklist_json(
         ) as temporary:
             temporary_path = Path(temporary.name)
             temporary.write(serialized)
-            temporary.write("\n")
+            temporary.write(b"\n")
             temporary.flush()
             os.fsync(temporary.fileno())
         temporary_path.replace(destination)

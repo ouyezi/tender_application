@@ -306,6 +306,47 @@ async def test_mixed_raw_response_keys_save_fallback_then_fail_validation(
     assert items == []
 
 
+@pytest.mark.asyncio
+async def test_surrogate_raw_response_saves_utf8_fallback_then_fails_validation(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import (
+        ChecklistService,
+        ChecklistValidationError,
+    )
+
+    tender_markdown = await create_task_source(tmp_path)
+    draft = replace(
+        valid_draft(tender_markdown),
+        raw_response={"invalid_unicode": "\ud800"},
+    )
+
+    with pytest.raises(
+        ChecklistValidationError,
+        match="raw_response must be JSON serializable",
+    ):
+        await ChecklistService(StaticAgent(draft)).generate_for_task(
+            "task-checklist"
+        )
+
+    async with db.SessionLocal() as session:
+        generation = (await session.scalars(select(ChecklistGeneration))).one()
+        task = await session.get(DiagnosisTask, "task-checklist")
+        categories = (await session.scalars(select(ChecklistCategory))).all()
+        items = (await session.scalars(select(ChecklistItem))).all()
+
+    raw_path = Path(generation.raw_response_path)
+    fallback = json.loads(raw_path.read_text(encoding="utf-8"))
+    assert "UnicodeEncodeError" in fallback["serialization_error"]
+    assert "\\ud800" in fallback["safe_repr"]
+    assert generation.status == "failed"
+    assert task.status == "failed"
+    assert task.current_checklist_generation_id is None
+    assert categories == []
+    assert items == []
+
+
 def invalid_json_value(case_name: str):
     if case_name == "nan":
         return {"value": float("nan")}
