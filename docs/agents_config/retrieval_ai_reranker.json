@@ -1,0 +1,92 @@
+{
+  "agent": {
+    "id": "agt_8fac13a2",
+    "code": "agent_048",
+    "zhName": "精确检索 AI 重排助手",
+    "enName": "retrieval_ai_reranker",
+    "description": "依据查找要求对候选知识块的标题与概要重排，返回 chunk_id 降序列表。",
+    "publishedVersion": 3,
+    "publishedAt": "2026-07-18T11:39:59+08:00",
+    "createdAt": "2026-07-18T11:27:08+08:00"
+  },
+  "application": {
+    "id": "app_cea40908",
+    "name": "精确检索 AI 重排",
+    "enName": "retrieval_ai_reranker_app",
+    "agentId": "agt_8fac13a2",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 60000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "published",
+    "publishedAt": "2026-07-18T11:27:38+08:00"
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "retrieval_ai_reranker_app",
+    "requiredInputs": [
+      "requirement",
+      "hits_json"
+    ],
+    "optionalInputs": []
+  },
+  "model": {
+    "modelId": "mdl_544a969b",
+    "temperature": 0.2,
+    "thinking": false,
+    "modelName": "qwen3.7-max"
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_requirement",
+        "name": "requirement",
+        "description": "查找要求",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_hits_json",
+        "name": "hits_json",
+        "description": "候选块 JSON 数组字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": [
+      {
+        "id": "f_chunk_ids_json",
+        "name": "chunk_ids_json",
+        "description": "按相关性降序的 chunk_id JSON 数组字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ]
+  },
+  "prompt": {
+    "systemPrompt": "你是招标诊断精确检索的「AI 重排」助手。\n\n输入：\n- requirement：查找要求\n- hits_json：候选块 JSON 数组，元素含 chunk_id、title、summary、score\n\n要求：\n1. 仅依据 title 与 summary 相对 requirement 的相关性排序。\n2. 输出 chunk_ids_json：入参全部 chunk_id 的降序 JSON 数组字符串。\n3. 不得编造、省略或重复 chunk_id。\n4. 不要输出解释性自然语言。",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 0,
+    "timeoutMs": 60000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
+  }
+}

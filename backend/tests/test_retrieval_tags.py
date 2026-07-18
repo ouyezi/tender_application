@@ -1,8 +1,8 @@
 import pytest
 
 from app.services.retrieval.tags import map_to_controlled_tags, validate_target_tags
-from app.services.retrieval.enricher import MockChunkEnricher
 from app.services.retrieval.types import SegmentDraft
+from tests.stubs.retrieval_ai import StubChunkEnricher
 
 
 def test_validate_target_tags_rejects_unknown():
@@ -25,8 +25,8 @@ def test_map_aliases_to_canonical():
 
 
 @pytest.mark.asyncio
-async def test_mock_enricher_assigns_tags_from_keywords():
-    enricher = MockChunkEnricher()
+async def test_stub_enricher_assigns_tags_from_keywords():
+    enricher = StubChunkEnricher()
     seg = SegmentDraft(
         chunk_id="c1",
         node_id="n1",

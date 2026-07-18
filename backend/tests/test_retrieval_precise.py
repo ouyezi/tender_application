@@ -14,6 +14,7 @@ from app.models import DiagnosisTask, WorkspaceFile
 from app.services import artifact, index_scheduler
 from app.services.parse.chunk import chunk_from_tree
 from app.services.parse.tree import build_document_tree
+from tests.stubs.retrieval_ai import apply_retrieval_ai_stubs
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -33,6 +34,7 @@ async def db_session(tmp_path, monkeypatch):
     monkeypatch.setattr("app.config.UPLOAD_DIR", upload_dir)
     monkeypatch.setattr("app.services.artifact.UPLOAD_DIR", upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
+    apply_retrieval_ai_stubs(monkeypatch)
 
     await index_scheduler.reset_for_tests()
 
@@ -148,17 +150,36 @@ async def test_precise_search_merges_channels_and_reranks(
 
 
 @pytest.mark.asyncio
-async def test_precise_search_degrades_when_reranker_fails(
+async def test_precise_search_fails_when_reranker_raises(
     provider, monkeypatch, indexed_semantic_task
 ):
     async def boom(*a, **k):
         raise RuntimeError("rerank down")
 
     monkeypatch.setattr(provider, "_ai_rerank", boom)
-    result = await provider.retrieve(
-        task_id=indexed_semantic_task,
-        content_source="precise_search",
-        content_target={"query": "退款"},
+    with pytest.raises(RuntimeError, match="rerank down"):
+        await provider.retrieve(
+            task_id=indexed_semantic_task,
+            content_source="precise_search",
+            content_target={"query": "退款"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_precise_search_fails_when_rewriter_raises(
+    provider, monkeypatch, indexed_semantic_task
+):
+    class Boom:
+        async def rewrite(self, query, hints=None):
+            raise RuntimeError("rewrite down")
+
+    monkeypatch.setattr(
+        "app.services.retrieval.provider.get_query_rewriter",
+        lambda: Boom(),
     )
-    assert result.degraded is True
-    assert result.items
+    with pytest.raises(RuntimeError, match="rewrite down"):
+        await provider.retrieve(
+            task_id=indexed_semantic_task,
+            content_source="precise_search",
+            content_target={"query": "退款"},
+        )

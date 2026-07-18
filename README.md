@@ -105,6 +105,16 @@ cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5555
 ## 说明
 
 - **无鉴权**：所有接口公开可用，仅用于本地演示。
-- **Mock 引擎**：解读、检查项生成与诊断均为 Mock 实现；诊断阶段按任务生成的检查项清单 + 分类批量 Mock 执行，不再以创建时的全局诊断配置作为执行清单。诊断结果为模拟数据，不解析上传文件正文。
+- **引擎现状**：检查项生成与文档检索 AI 步骤（知识块富化、Wiki 文案、查询重写、AI 重排）通过 Agent OS 应用调用；解读与分类批诊断当前仍为 Mock。诊断阶段按任务生成的检查项清单批量执行，不再以创建时的全局诊断配置作为执行清单。
 - **存储**：SQLite 数据库 + 本地 `uploads/`、`reports/` 目录（均已加入 `.gitignore`）。
 - **测试**：`cd backend && ../.venv/bin/python -m pytest`
+
+### Agent OS 调用规范
+
+- **必须复用** `backend/app/services/agent_os.py` 中的 `AgentOSClient.invoke_app`（或向适配器注入同一签名的 `invoke_app`）。
+- **禁止**在业务模块直接用 `httpx` / `requests` 等访问 Agent OS 的 `/v1/apps/*`。
+- 连接配置：环境变量或项目根 `config.local.json` 的 `agentOs` 块；`docs/agents_config/*.json` 仅为已发布契约快照，不承载密钥。
+- 当前已接入应用（运行时以各适配器常量为准）：
+  - `tender_doc_interpreter_app`（解读，若已接线）
+  - `tender_checklist_generator_app`（检查项生成）
+  - `retrieval_chunk_enricher_app` / `retrieval_wiki_writer_app` / `retrieval_query_rewriter_app` / `retrieval_ai_reranker_app`（文档检索）

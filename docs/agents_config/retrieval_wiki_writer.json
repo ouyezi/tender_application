@@ -1,0 +1,92 @@
+{
+  "agent": {
+    "id": "agt_ad219168",
+    "code": "agent_046",
+    "zhName": "检索 Wiki 页文案助手",
+    "enName": "retrieval_wiki_writer",
+    "description": "根据后端按受控标签聚合的成员块摘要，生成 Wiki 主题页的标题、概要与描述。",
+    "publishedVersion": 2,
+    "publishedAt": "2026-07-18T11:39:27+08:00",
+    "createdAt": "2026-07-18T11:27:08+08:00"
+  },
+  "application": {
+    "id": "app_c055fb7d",
+    "name": "检索 Wiki 页文案",
+    "enName": "retrieval_wiki_writer_app",
+    "agentId": "agt_ad219168",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 180000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "published",
+    "publishedAt": "2026-07-18T11:27:38+08:00"
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "retrieval_wiki_writer_app",
+    "requiredInputs": [
+      "task_id",
+      "pages_json"
+    ],
+    "optionalInputs": []
+  },
+  "model": {
+    "modelId": "mdl_544a969b",
+    "temperature": 0.3,
+    "thinking": false,
+    "modelName": "qwen3.7-max"
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_task_id",
+        "name": "task_id",
+        "description": "工作区任务 ID",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_pages_json",
+        "name": "pages_json",
+        "description": "已聚合页面 JSON 字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": [
+      {
+        "id": "f_pages_json_out",
+        "name": "pages_json",
+        "description": "文案结果 JSON 字符串：[{tag_name,title,summary,description}]",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ]
+  },
+  "prompt": {
+    "systemPrompt": "你是招标工作区文档检索链路中的「Wiki 页文案」助手。\n\n输入：\n- task_id：任务 ID\n- pages_json：后端已按受控标签聚合的页面 JSON 数组，元素含 tag_name、member_chunk_ids、member_summaries\n\n要求：\n1. 为每一个入参 tag_name 生成 title、summary、description。\n2. 不得修改或返回 member_chunk_ids；成员列表以后端为准。\n3. 文案应概括该标签下材料主题，服务精确检索的 Wiki 召回导航。\n4. 输出仅含 pages_json 字符串：[{tag_name,title,summary,description}]，tag_name 必须与入参一一对应。\n5. 不要输出解释性自然语言。",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 0,
+    "timeoutMs": 180000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
+  }
+}

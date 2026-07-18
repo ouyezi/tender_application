@@ -20,8 +20,8 @@ from app.engine.base import RetrievalHit, RetrievalResult
 from app.models import DiagnosisTask, IndexJob, KnowledgeChunk, WorkspaceFile
 from app.services.retrieval.fts import search_fts
 from app.services.retrieval.persist import load_chunk_text
-from app.services.retrieval.rerank import MockAiReranker, get_ai_reranker
-from app.services.retrieval.rewrite import MockQueryRewriter, get_query_rewriter
+from app.services.retrieval.rerank import get_ai_reranker
+from app.services.retrieval.rewrite import get_query_rewriter
 from app.services.retrieval.tags import load_tag_catalog, validate_target_tags
 from app.services.retrieval.vectors import VectorIndex, get_embedding_model
 from app.services.retrieval.wiki import search_wiki
@@ -283,16 +283,7 @@ async def _precise_search(
             error="missing query",
         )
 
-    degraded = False
-    rewrite = {
-        "vector_query": query or " ".join(hints),
-        "keywords": hints or ([query] if query else []),
-        "wiki_query": query or " ".join(hints),
-    }
-    try:
-        rewrite = await get_query_rewriter().rewrite(query, hints)
-    except Exception:
-        degraded = True
+    rewrite = await get_query_rewriter().rewrite(query, hints)
 
     vector_query = str(rewrite.get("vector_query") or query)
     keywords = [str(k) for k in rewrite.get("keywords") or [] if str(k).strip()]
@@ -317,7 +308,6 @@ async def _precise_search(
             items=[],
             index_status=index_status,
             incomplete=incomplete,
-            degraded=degraded,
         )
 
     chunk_result = await session.execute(
@@ -344,15 +334,11 @@ async def _precise_search(
         candidate_hits.append(hit)
 
     rerank_fn = ai_rerank or ai_rerank_hits
-    try:
-        reranked_ids = await rerank_fn(
-            session,
-            query or fts_query,
-            candidate_hits,
-        )
-    except Exception:
-        degraded = True
-        reranked_ids = [hit.chunk_id for hit in candidate_hits]
+    reranked_ids = await rerank_fn(
+        session,
+        query or fts_query,
+        candidate_hits,
+    )
 
     order = {chunk_id: idx for idx, chunk_id in enumerate(reranked_ids)}
     candidate_hits.sort(
@@ -409,7 +395,6 @@ async def _precise_search(
         items=final_hits,
         index_status=index_status,
         incomplete=incomplete,
-        degraded=degraded,
     )
 
 

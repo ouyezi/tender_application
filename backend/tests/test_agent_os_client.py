@@ -143,3 +143,24 @@ async def test_invoke_app_non_object_json_raises(tmp_path, monkeypatch):
     client = agent_os.AgentOSClient(transport=httpx.MockTransport(handler))
     with pytest.raises(agent_os.AgentOSResponseError):
         await client.invoke_app("demo_app", {})
+
+
+@pytest.mark.asyncio
+async def test_invoke_app_unwraps_structured_output(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
+    monkeypatch.setenv("AGENT_OS_BASE_URL", "http://agent-os.test")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "requestId": "rec_1",
+                "status": "completed",
+                "output": "ignored",
+                "structuredOutput": {"vector_query": "q", "keywords_json": "[]"},
+            },
+        )
+
+    client = agent_os.AgentOSClient(transport=httpx.MockTransport(handler))
+    result = await client.invoke_app("demo_app", {"query": "x"})
+    assert result == {"vector_query": "q", "keywords_json": "[]"}
