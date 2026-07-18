@@ -11,7 +11,7 @@ from app.config import (
     MOCK_INTERPRET_DELAY_SECONDS,
 )
 from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
-from app.engine.checklist_mock import MockChecklistAgent
+from app.engine.checklist_agent_os import AgentOSChecklistAgent
 from app.engine.interpretation_mock import MockInterpretationAgent
 from app.engine.retrieval_mock import MockRetrievalProvider
 from app.engine.retrieval_workspace import WorkspaceRetrievalProvider
@@ -167,7 +167,7 @@ async def _run_checklist_retry(task_id: str) -> None:
             await _mark_stopped(task_id)
             return
 
-        await ChecklistService(agent=MockChecklistAgent()).generate_for_task(task_id)
+        await ChecklistService(agent=AgentOSChecklistAgent()).generate_for_task(task_id)
 
         if _should_stop(task_id):
             await _mark_stopped(task_id)
@@ -597,7 +597,7 @@ async def _run(task_id: str) -> None:
                 return
 
             try:
-                await ChecklistService(agent=MockChecklistAgent()).generate_for_task(
+                await ChecklistService(agent=AgentOSChecklistAgent()).generate_for_task(
                     task_id
                 )
             except (

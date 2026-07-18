@@ -8,7 +8,8 @@ from httpx import AsyncClient
 
 from app import db
 from app.models import DiagnosisTask, WorkspaceFile
-from app.engine.checklist_mock import MockChecklistAgent
+from app.engine.checklist_agent_os import AgentOSChecklistAgent
+from tests.fake_checklist_invoke import make_fake_checklist_invoke
 from app.services import scheduler
 
 
@@ -361,13 +362,11 @@ async def test_cannot_pause_while_generating_checklist(client, monkeypatch):
     class BlockingChecklistAgent:
         async def generate(self, *, task_id, context):
             await gate.wait()
-            return await MockChecklistAgent().generate(
-                task_id=task_id,
-                context=context,
-            )
+            agent = AgentOSChecklistAgent(invoke_app=make_fake_checklist_invoke())
+            return await agent.generate(task_id=task_id, context=context)
 
     monkeypatch.setattr(
-        "app.services.scheduler.MockChecklistAgent",
+        "app.services.scheduler.AgentOSChecklistAgent",
         BlockingChecklistAgent,
     )
     await _seed_configs(client, 1)
@@ -397,13 +396,11 @@ async def test_stop_during_generating_checklist(client, monkeypatch):
     class BlockingChecklistAgent:
         async def generate(self, *, task_id, context):
             await gate.wait()
-            return await MockChecklistAgent().generate(
-                task_id=task_id,
-                context=context,
-            )
+            agent = AgentOSChecklistAgent(invoke_app=make_fake_checklist_invoke())
+            return await agent.generate(task_id=task_id, context=context)
 
     monkeypatch.setattr(
-        "app.services.scheduler.MockChecklistAgent",
+        "app.services.scheduler.AgentOSChecklistAgent",
         BlockingChecklistAgent,
     )
     await _seed_configs(client, 1)

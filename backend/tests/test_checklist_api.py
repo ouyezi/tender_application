@@ -309,7 +309,7 @@ async def test_retry_checklist_agent_failure_marks_task_failed_safely(
     await _create_source(tmp_path, status="failed")
     monkeypatch.setattr(
         scheduler,
-        "MockChecklistAgent",
+        "AgentOSChecklistAgent",
         FailingChecklistAgent,
         raising=False,
     )

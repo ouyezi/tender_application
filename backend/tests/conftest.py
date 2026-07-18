@@ -8,6 +8,22 @@ from app.db import get_db
 from app.main import app
 from app.models import Base
 from app.services import index_scheduler, parse_scheduler, scheduler
+from tests.fake_checklist_invoke import make_fake_checklist_invoke
+
+
+class _SchedulerChecklistAgent:
+    agent_type = "agent_os"
+    agent_version = "1"
+
+    def __init__(self, **kwargs):
+        from app.engine.checklist_agent_os import AgentOSChecklistAgent
+
+        if "invoke_app" not in kwargs and "client" not in kwargs:
+            kwargs["invoke_app"] = make_fake_checklist_invoke()
+        self._agent = AgentOSChecklistAgent(**kwargs)
+
+    async def generate(self, *, task_id, context):
+        return await self._agent.generate(task_id=task_id, context=context)
 
 
 @pytest_asyncio.fixture
@@ -52,6 +68,10 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.scheduler.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
     monkeypatch.setattr("app.config.CHECKLIST_PARSE_POLL_SECONDS", 0.01)
     monkeypatch.setattr("app.config.RETRIEVAL_PROVIDER", "mock")
+    monkeypatch.setattr(
+        "app.services.scheduler.AgentOSChecklistAgent",
+        _SchedulerChecklistAgent,
+    )
 
     async def _fake_parse_pipeline(file_id: str, task_id: str, stored_path: str):
         from app.services import artifact
