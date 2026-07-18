@@ -203,3 +203,11 @@ def apply_retrieval_ai_stubs(monkeypatch) -> None:
         "app.services.retrieval.provider.get_ai_reranker",
         lambda: StubAiReranker(),
     )
+    monkeypatch.setattr(
+        "app.services.retrieval.debug.get_query_rewriter",
+        lambda: StubQueryRewriter(),
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval.debug.get_ai_reranker",
+        lambda: StubAiReranker(),
+    )
