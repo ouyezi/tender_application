@@ -33,7 +33,3 @@ EMBEDDING_MODEL_PATH = ""  # local path; empty → hash-embedding fallback for t
 EMBEDDING_DIM = 384
 OCR_ENABLED = True
 OCR_MIN_CHARS_PER_PAGE = 40
-AGENT_CHUNK_ENRICHER = "mock"  # mock | agent_os
-AGENT_QUERY_REWRITER = "mock"
-AGENT_AI_RERANKER = "mock"
-AGENT_WIKI_BUILDER = "mock"

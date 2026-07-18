@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 from typing import Protocol
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import INDEX_TAG_MIN_CONFIDENCE
-from app.models import KnowledgeChunk, WikiPage
+from app.models import WikiPage
 
 
 class WikiBuilder(Protocol):
@@ -28,59 +27,10 @@ def _parse_json_list(raw: str | None) -> list:
     return data if isinstance(data, list) else []
 
 
-class MockWikiBuilder:
-    """Group fine chunks by controlled tag into task-level wiki pages."""
-
-    async def build_for_task(
-        self,
-        session: AsyncSession,
-        task_id: str,
-    ) -> None:
-        await session.execute(delete(WikiPage).where(WikiPage.task_id == task_id))
-
-        result = await session.execute(
-            select(KnowledgeChunk).where(
-                KnowledgeChunk.task_id == task_id,
-                KnowledgeChunk.segment_level == "fine",
-                KnowledgeChunk.index_status == "ready",
-            )
-        )
-        fine_chunks = result.scalars().all()
-
-        grouped: dict[str, list[KnowledgeChunk]] = {}
-        for chunk in fine_chunks:
-            for tag in _parse_json_list(chunk.tags):
-                name = tag.get("name")
-                confidence = float(tag.get("confidence", 0.0))
-                if not name or confidence < INDEX_TAG_MIN_CONFIDENCE:
-                    continue
-                grouped.setdefault(name, []).append(chunk)
-
-        for tag_name, members in grouped.items():
-            summaries = [chunk.summary or chunk.title for chunk in members[:3]]
-            session.add(
-                WikiPage(
-                    task_id=task_id,
-                    title=tag_name,
-                    summary="；".join(s for s in summaries if s),
-                    description=f"{tag_name} 主题页",
-                    tags=json.dumps([tag_name], ensure_ascii=False),
-                    member_chunk_ids=json.dumps(
-                        [chunk.chunk_id for chunk in members],
-                        ensure_ascii=False,
-                    ),
-                )
-            )
-
-
 def get_wiki_builder() -> WikiBuilder:
-    from app import config
+    from app.services.retrieval.wiki_agent_os import AgentOSWikiBuilder
 
-    if config.AGENT_WIKI_BUILDER == "agent_os":
-        from app.services.retrieval.wiki_agent_os import AgentOSWikiBuilder
-
-        return AgentOSWikiBuilder()
-    return MockWikiBuilder()
+    return AgentOSWikiBuilder()
 
 
 async def search_wiki(

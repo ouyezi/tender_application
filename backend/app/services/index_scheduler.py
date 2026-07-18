@@ -2,7 +2,7 @@
 
 Mirrors ``app.services.parse_scheduler``: claim the oldest queued job,
 materialize fine/large segments from parse artifacts, enrich them with
-controlled tags via ``MockChunkEnricher``, persist as ``KnowledgeChunk`` rows,
+controlled tags via ``ChunkEnricher``, persist as ``KnowledgeChunk`` rows,
 and mark the job ``ready``.
 """
 

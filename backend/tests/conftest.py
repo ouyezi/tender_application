@@ -9,6 +9,7 @@ from app.main import app
 from app.models import Base
 from app.services import index_scheduler, parse_scheduler, scheduler
 from tests.fake_checklist_invoke import make_fake_checklist_invoke
+from tests.stubs.retrieval_ai import apply_retrieval_ai_stubs
 
 
 class _SchedulerChecklistAgent:
@@ -68,6 +69,7 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.scheduler.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
     monkeypatch.setattr("app.config.CHECKLIST_PARSE_POLL_SECONDS", 0.01)
     monkeypatch.setattr("app.config.RETRIEVAL_PROVIDER", "mock")
+    apply_retrieval_ai_stubs(monkeypatch)
     monkeypatch.setattr(
         "app.services.scheduler.AgentOSChecklistAgent",
         _SchedulerChecklistAgent,

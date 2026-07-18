@@ -14,6 +14,7 @@ from app.models import DiagnosisTask, WorkspaceFile
 from app.services import artifact, index_scheduler
 from app.services.parse.chunk import chunk_from_tree
 from app.services.parse.tree import build_document_tree
+from tests.stubs.retrieval_ai import apply_retrieval_ai_stubs
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -33,6 +34,7 @@ async def db_session(tmp_path, monkeypatch):
     monkeypatch.setattr("app.config.UPLOAD_DIR", upload_dir)
     monkeypatch.setattr("app.services.artifact.UPLOAD_DIR", upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
+    apply_retrieval_ai_stubs(monkeypatch)
 
     await index_scheduler.reset_for_tests()
 
