@@ -109,3 +109,40 @@ export function getChecklist(taskId) {
 export function retryChecklist(taskId) {
   return request(`/api/tasks/${taskId}/checklist/retry`, { method: 'POST' })
 }
+
+export function getKnowledgeIndexStatus(taskId) {
+  return request(`/api/workspaces/${taskId}/knowledge/index-status`)
+}
+
+export function getKnowledgeChunks(taskId, params = {}) {
+  const qs = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+  })
+  const q = qs.toString()
+  return request(`/api/workspaces/${taskId}/knowledge/chunks${q ? `?${q}` : ''}`)
+}
+
+export function getKnowledgeChunk(taskId, chunkId) {
+  return request(`/api/workspaces/${taskId}/knowledge/chunks/${encodeURIComponent(chunkId)}`)
+}
+
+export function getKnowledgeTags(taskId) {
+  return request(`/api/workspaces/${taskId}/knowledge/tags`)
+}
+
+export function getKnowledgeWiki(taskId) {
+  return request(`/api/workspaces/${taskId}/knowledge/wiki`)
+}
+
+export function getKnowledgeWikiPage(taskId, wikiId) {
+  return request(`/api/workspaces/${taskId}/knowledge/wiki/${wikiId}`)
+}
+
+export function debugKnowledgeRetrieve(taskId, body) {
+  return request(`/api/workspaces/${taskId}/knowledge/debug/retrieve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}

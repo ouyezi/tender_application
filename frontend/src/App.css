@@ -1336,3 +1336,54 @@ a:hover {
     max-height: 40vh;
   }
 }
+
+/* —— Knowledge debug —— */
+.knowledge-debug-page .knowledge-status-bar {
+  margin-bottom: 1rem;
+}
+
+.knowledge-status-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  font-size: 0.925rem;
+  color: var(--text-muted);
+}
+
+.knowledge-status-meta strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.knowledge-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border, #ddd);
+  margin-bottom: 1rem;
+}
+
+.knowledge-tab {
+  background: none;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.925rem;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.knowledge-tab:hover {
+  color: var(--accent);
+}
+
+.knowledge-tab.active {
+  border-bottom-color: var(--accent, #2563eb);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.knowledge-tab-panel {
+  min-height: 12rem;
+}

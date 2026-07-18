@@ -178,9 +178,14 @@ export default function WorkspaceDetailPage() {
         </div>
         <div className="page-header-actions">
           {taskId && (
-            <Link className="btn btn-secondary" to={`/tasks/${taskId}`}>
-              诊断详情
-            </Link>
+            <>
+              <Link className="btn btn-secondary" to={`/tasks/${taskId}`}>
+                诊断详情
+              </Link>
+              <Link className="btn btn-secondary" to={`/workspaces/${taskId}/knowledge`}>
+                知识检索
+              </Link>
+            </>
           )}
           <button type="button" className="btn btn-primary" onClick={() => setImportOpen(true)}>
             导入文件
