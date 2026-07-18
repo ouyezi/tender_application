@@ -114,6 +114,8 @@ def merge_checklist_drafts(
                         consequence_rules=dict(item.consequence_rules),
                         admin_config_refs=list(item.admin_config_refs),
                         sort_order=len(final_items) + 1,
+                        content_source=item.content_source or "precise_search",
+                        content_target=dict(item.content_target or {}),
                     )
                 )
 

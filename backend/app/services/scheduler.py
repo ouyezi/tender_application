@@ -191,7 +191,11 @@ async def _run_checklist_retry(task_id: str) -> None:
             if task.current_checklist_generation_id is None:
                 raise RuntimeError("checklist_generation_missing")
 
-        await _complete_from_diagnosis(task_id)
+        try:
+            await _complete_from_diagnosis(task_id)
+        except Exception as exc:
+            await _mark_failed(task_id, str(exc)[:240], "diagnosis")
+            return
     except asyncio.CancelledError:
         raise
     except (ChecklistValidationError, ChecklistInputError, TenderParseBlockedError) as exc:

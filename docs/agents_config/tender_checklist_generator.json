@@ -5,8 +5,8 @@
     "zhName": "招标诊断检查项生成助手",
     "enName": "tender_checklist_generator",
     "description": "基于解读报告、管理配置参考与招标正文分片，生成近终态诊断检查项（分类+条目），供标书合规诊断使用。",
-    "publishedVersion": 2,
-    "publishedAt": "2026-07-18T10:46:04+08:00",
+    "publishedVersion": 3,
+    "publishedAt": "2026-07-18T12:06:51+08:00",
     "createdAt": "2026-07-18T09:49:37+08:00"
   },
   "application": {
@@ -39,10 +39,10 @@
     "optionalInputs": []
   },
   "model": {
-    "modelId": "mdl_544a969b",
-    "modelName": "qwen3.7-max",
+    "modelId": "mdl_780e2fbe",
+    "modelName": "qwen3.6-flash",
     "temperature": 0.3,
-    "thinking": true
+    "thinking": false
   },
   "io": {
     "formatInput": true,

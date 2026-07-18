@@ -5,8 +5,8 @@
     "zhName": "精确检索 AI 重排助手",
     "enName": "retrieval_ai_reranker",
     "description": "依据查找要求对候选知识块的标题与概要重排，返回 chunk_id 降序列表。",
-    "publishedVersion": 3,
-    "publishedAt": "2026-07-18T11:39:59+08:00",
+    "publishedVersion": 4,
+    "publishedAt": "2026-07-18T12:37:00+08:00",
     "createdAt": "2026-07-18T11:27:08+08:00"
   },
   "application": {
@@ -37,10 +37,10 @@
     "optionalInputs": []
   },
   "model": {
-    "modelId": "mdl_544a969b",
+    "modelId": "mdl_780e2fbe",
+    "modelName": "qwen3.6-flash",
     "temperature": 0.2,
-    "thinking": false,
-    "modelName": "qwen3.7-max"
+    "thinking": false
   },
   "io": {
     "formatInput": true,
@@ -78,7 +78,7 @@
     ]
   },
   "prompt": {
-    "systemPrompt": "你是招标诊断精确检索的「AI 重排」助手。\n\n输入：\n- requirement：查找要求\n- hits_json：候选块 JSON 数组，元素含 chunk_id、title、summary、score\n\n要求：\n1. 仅依据 title 与 summary 相对 requirement 的相关性排序。\n2. 输出 chunk_ids_json：入参全部 chunk_id 的降序 JSON 数组字符串。\n3. 不得编造、省略或重复 chunk_id。\n4. 不要输出解释性自然语言。",
+    "systemPrompt": "你是招标诊断精确检索的「AI 重排」助手。\n\n查找要求 requirement：\n{{requirement}}\n候选块 hits_json：\n{{hits_json}}\n\n要求：\n1. 仅依据 title 与 summary 相对 requirement 的相关性排序。\n2. 必须通过结构化输出字段 chunk_ids_json 返回结果：该字段值为 JSON 数组字符串，例如 \"[\\\"a\\\",\\\"b\\\"]\"。\n3. chunk_ids_json 必须包含入参全部 chunk_id，按相关性降序，不得编造、省略或重复。\n4. 禁止只输出裸数组到自然语言；禁止输出解释性文字。",
     "initialMessages": []
   },
   "runtime": {

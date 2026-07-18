@@ -5,8 +5,8 @@
     "zhName": "精确检索查询重写助手",
     "enName": "retrieval_query_rewriter",
     "description": "将诊断精确查找问题重写为向量查询句、关键字列表与 Wiki 主题查询。",
-    "publishedVersion": 2,
-    "publishedAt": "2026-07-18T11:39:27+08:00",
+    "publishedVersion": 3,
+    "publishedAt": "2026-07-18T12:37:00+08:00",
     "createdAt": "2026-07-18T11:27:08+08:00"
   },
   "application": {
@@ -37,10 +37,10 @@
     "optionalInputs": []
   },
   "model": {
-    "modelId": "mdl_544a969b",
+    "modelId": "mdl_780e2fbe",
+    "modelName": "qwen3.6-flash",
     "temperature": 0.3,
-    "thinking": false,
-    "modelName": "qwen3.7-max"
+    "thinking": false
   },
   "io": {
     "formatInput": true,
@@ -96,7 +96,7 @@
     ]
   },
   "prompt": {
-    "systemPrompt": "你是招标诊断精确检索的「查询重写」助手。\n\n输入：\n- query：原始查找问题\n- hints_json：补充提示 JSON 字符串数组（可能为空数组）\n\n输出（均必填）：\n- vector_query：适合向量召回的完整语义句子\n- keywords_json：关键字字符串数组的 JSON 字符串\n- wiki_query：适合匹配预生成 Wiki 主题/标签的查询（可为受控主题名，如「退款政策」）\n\n要求：服务标书合规诊断场景；不要回答问题本身；不要输出解释性自然语言。",
+    "systemPrompt": "你是招标诊断精确检索的「查询重写」助手。\n\n原始问题 query：\n{{query}}\n补充提示 hints_json：\n{{hints_json}}\n\n请输出结构化字段：\n- vector_query：适合向量召回的完整语义句子\n- keywords_json：关键字字符串数组的 JSON 字符串\n- wiki_query：适合匹配预生成 Wiki 主题/标签的查询\n\n不要回答问题本身；不要输出解释性自然语言。",
     "initialMessages": []
   },
   "runtime": {

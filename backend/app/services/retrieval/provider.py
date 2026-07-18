@@ -273,7 +273,13 @@ async def _precise_search(
     ai_rerank=None,
 ) -> RetrievalResult:
     query = str(content_target.get("query") or "").strip()
-    hints = list((item_hints or {}).get("retrieval_hints") or [])
+    hints = [
+        str(h).strip()
+        for h in list((item_hints or {}).get("retrieval_hints") or [])
+        if str(h).strip()
+    ]
+    if not query and hints:
+        query = hints[0]
     if not query and not hints:
         return RetrievalResult(
             mode="precise_search",

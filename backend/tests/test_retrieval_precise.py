@@ -183,3 +183,34 @@ async def test_precise_search_fails_when_rewriter_raises(
             content_source="precise_search",
             content_target={"query": "退款"},
         )
+
+
+@pytest.mark.asyncio
+async def test_precise_search_falls_back_to_hints_when_query_empty(
+    provider, monkeypatch, indexed_semantic_task
+):
+    captured = {}
+
+    class Capture:
+        async def rewrite(self, query, hints=None):
+            captured["query"] = query
+            captured["hints"] = list(hints or [])
+            return {
+                "vector_query": query,
+                "keywords": [query],
+                "wiki_query": query,
+            }
+
+    monkeypatch.setattr(
+        "app.services.retrieval.provider.get_query_rewriter",
+        lambda: Capture(),
+    )
+    result = await provider.retrieve(
+        task_id=indexed_semantic_task,
+        content_source="precise_search",
+        content_target={},
+        item_hints={"retrieval_hints": ["七天无理由退货"]},
+    )
+    assert captured["query"] == "七天无理由退货"
+    assert result.mode == "precise_search"
+    assert result.error is None

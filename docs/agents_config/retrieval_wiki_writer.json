@@ -5,8 +5,8 @@
     "zhName": "检索 Wiki 页文案助手",
     "enName": "retrieval_wiki_writer",
     "description": "根据后端按受控标签聚合的成员块摘要，生成 Wiki 主题页的标题、概要与描述。",
-    "publishedVersion": 2,
-    "publishedAt": "2026-07-18T11:39:27+08:00",
+    "publishedVersion": 3,
+    "publishedAt": "2026-07-18T12:37:00+08:00",
     "createdAt": "2026-07-18T11:27:08+08:00"
   },
   "application": {
@@ -37,10 +37,10 @@
     "optionalInputs": []
   },
   "model": {
-    "modelId": "mdl_544a969b",
+    "modelId": "mdl_780e2fbe",
+    "modelName": "qwen3.6-flash",
     "temperature": 0.3,
-    "thinking": false,
-    "modelName": "qwen3.7-max"
+    "thinking": false
   },
   "io": {
     "formatInput": true,
@@ -69,7 +69,7 @@
       {
         "id": "f_pages_json_out",
         "name": "pages_json",
-        "description": "文案结果 JSON 字符串：[{tag_name,title,summary,description}]",
+        "description": "文案结果 JSON 字符串",
         "type": "string",
         "required": true,
         "children": null,
@@ -78,7 +78,7 @@
     ]
   },
   "prompt": {
-    "systemPrompt": "你是招标工作区文档检索链路中的「Wiki 页文案」助手。\n\n输入：\n- task_id：任务 ID\n- pages_json：后端已按受控标签聚合的页面 JSON 数组，元素含 tag_name、member_chunk_ids、member_summaries\n\n要求：\n1. 为每一个入参 tag_name 生成 title、summary、description。\n2. 不得修改或返回 member_chunk_ids；成员列表以后端为准。\n3. 文案应概括该标签下材料主题，服务精确检索的 Wiki 召回导航。\n4. 输出仅含 pages_json 字符串：[{tag_name,title,summary,description}]，tag_name 必须与入参一一对应。\n5. 不要输出解释性自然语言。",
+    "systemPrompt": "你是招标工作区文档检索链路中的「Wiki 页文案」助手。\n\n任务 ID：{{task_id}}\n已聚合页面 pages_json：\n{{pages_json}}\n\n要求：\n1. 为每一个入参 tag_name 生成 title、summary、description。\n2. 不得修改 member_chunk_ids；成员列表以后端为准。\n3. 输出必须且仅包含字段 pages_json（字符串），值为 JSON 数组 [{tag_name,title,summary,description}]，tag_name 与入参一一对应。\n4. 不要输出解释性自然语言，不要把数组拆成顶层字段。",
     "initialMessages": []
   },
   "runtime": {
