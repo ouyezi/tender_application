@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
 from app.schemas import ChecklistReportOut, TaskListOut, TaskOut
-from app.services import checklist_service, files, parse_scheduler, scheduler, workspace
+from app.services import checklist_service, files, parse_scheduler, scheduler, task_delete, workspace
 from app.services.checklist_service import (
     ChecklistNotAvailable,
     ChecklistTaskNotFound,
@@ -315,3 +315,11 @@ async def stop_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut
     except SchedulerConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     return await _load_task_out(db, task_id)
+
+
+@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task_endpoint(task_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    try:
+        await task_delete.delete_task(db, task_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")

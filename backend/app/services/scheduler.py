@@ -69,6 +69,17 @@ def _get_control(task_id: str) -> _TaskControl:
     return _controls[task_id]
 
 
+def discard_control(task_id: str) -> None:
+    """Drop in-memory control state after a task is deleted."""
+    ctrl = _controls.pop(task_id, None)
+    if ctrl is None:
+        return
+    ctrl.stop_requested = True
+    ctrl.pause_event.set()
+    if ctrl.bg_task is not None and not ctrl.bg_task.done():
+        ctrl.bg_task.cancel()
+
+
 async def reset_for_tests() -> None:
     """Clear in-memory scheduler state between tests."""
     tasks = []

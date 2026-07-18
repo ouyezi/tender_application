@@ -17,6 +17,13 @@ def artifact_root(task_id: str) -> Path:
     return UPLOAD_DIR / task_id
 
 
+def remove_artifact_root(task_id: str) -> None:
+    """Best-effort remove uploads/{task_id}. Missing path is OK."""
+    root = artifact_root(task_id)
+    if root.is_dir():
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def ensure_artifact_dirs(task_id: str) -> Path:
     root = artifact_root(task_id)
     root.mkdir(parents=True, exist_ok=True)

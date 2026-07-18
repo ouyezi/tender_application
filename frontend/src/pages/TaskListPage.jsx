@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { listTasks } from '../api'
+import { deleteTask, listTasks } from '../api'
 import TaskCard from '../components/TaskCard'
 import CreateTaskModal from '../components/CreateTaskModal'
 
@@ -10,6 +10,7 @@ export default function TaskListPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -35,6 +36,21 @@ export default function TaskListPage() {
     refresh(true)
     if (task?.id) {
       navigate(`/tasks/${task.id}`)
+    }
+  }
+
+  async function handleDelete(task) {
+    if (!window.confirm('确定删除该诊断任务？此操作不可恢复。')) return
+
+    setDeletingId(task.id)
+    setError('')
+    try {
+      await deleteTask(task.id)
+      await refresh(true)
+    } catch (err) {
+      setError(err.message || '删除任务失败')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -75,6 +91,8 @@ export default function TaskListPage() {
               key={task.id}
               task={task}
               onClick={(t) => navigate(`/tasks/${t.id}`)}
+              onDelete={handleDelete}
+              deleting={deletingId === task.id}
             />
           ))}
         </div>
