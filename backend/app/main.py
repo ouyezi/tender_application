@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.configs import router as configs_router
+from app.api.knowledge import router as knowledge_router
 from app.api.tasks import router as tasks_router
 from app.api.workspaces import router as workspaces_router
 from app.config import REPORT_DIR, UPLOAD_DIR
@@ -35,6 +36,7 @@ app.mount("/artifact-files", StaticFiles(directory=str(UPLOAD_DIR)), name="artif
 app.include_router(configs_router)
 app.include_router(tasks_router)
 app.include_router(workspaces_router)
+app.include_router(knowledge_router)
 # Demo 无鉴权：允许局域网其他机器通过本机 IP 访问前端时的跨域请求
 app.add_middleware(
     CORSMiddleware,
