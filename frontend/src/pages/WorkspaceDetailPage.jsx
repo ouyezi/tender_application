@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   getWorkspace,
   getWorkspaceContent,
@@ -46,8 +46,20 @@ function extractNodes(data) {
   return []
 }
 
+function findNodeById(nodes, id) {
+  if (!id) return null
+  for (const node of nodes || []) {
+    if (String(node.id) === String(id)) return node
+    const found = findNodeById(node.children, id)
+    if (found) return found
+  }
+  return null
+}
+
 export default function WorkspaceDetailPage() {
   const { taskId } = useParams()
+  const [searchParams] = useSearchParams()
+  const deepLinkApplied = useRef(false)
 
   const [workspace, setWorkspace] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -123,7 +135,7 @@ export default function WorkspaceDetailPage() {
   )
 
   const openFile = useCallback(
-    async (file) => {
+    async (file, preferredNodeId = null) => {
       if (!OPENABLE_STATUSES.has(file.parse_status)) return
       setSelectedFile(file)
       setSelectedNode(null)
@@ -137,7 +149,10 @@ export default function WorkspaceDetailPage() {
         const data = await getWorkspaceTree(taskId, file.id)
         const nodes = extractNodes(data)
         setTreeNodes(nodes)
-        if (nodes.length > 0) {
+        const preferred = findNodeById(nodes, preferredNodeId)
+        if (preferred) {
+          await selectNode(file, preferred)
+        } else if (nodes.length > 0) {
           await selectNode(file, nodes[0])
         }
       } catch (err) {
@@ -148,6 +163,20 @@ export default function WorkspaceDetailPage() {
     },
     [taskId, selectNode],
   )
+
+  useEffect(() => {
+    if (!workspace || deepLinkApplied.current) return
+    const fileId = searchParams.get('file_id')
+    if (!fileId) return
+    const file = (workspace.files || []).find((f) => String(f.id) === String(fileId))
+    if (!file) {
+      deepLinkApplied.current = true
+      return
+    }
+    if (!OPENABLE_STATUSES.has(file.parse_status)) return
+    deepLinkApplied.current = true
+    openFile(file, searchParams.get('node_id'))
+  }, [workspace, searchParams, openFile])
 
   async function handleReparse(file) {
     setReparsingIds((prev) => new Set(prev).add(file.id))
