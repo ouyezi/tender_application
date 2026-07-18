@@ -6,9 +6,10 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import KnowledgeChunk, KnowledgeTag
+from app.models import IndexJob, KnowledgeChunk, KnowledgeTag, WikiPage, WorkspaceFile
 from app.services.retrieval.fts import search_fts
 from app.services.retrieval.persist import load_chunk_text
+from app.services.retrieval.provider import _task_index_status
 
 TEXT_PREVIEW_LIMIT = 4000
 _FTS_BROWSE_LIMIT = 5000
@@ -193,3 +194,137 @@ async def list_tags(session: AsyncSession) -> list[dict[str, Any]]:
             }
         )
     return tags
+
+
+def _wiki_to_list_item(page: WikiPage) -> dict[str, Any]:
+    return {
+        "wiki_id": page.id,
+        "title": page.title,
+        "summary": page.summary,
+        "description": page.description,
+        "tags": _parse_json_list(page.tags),
+        "member_chunk_ids": _parse_json_list(page.member_chunk_ids),
+    }
+
+
+async def list_wiki_pages(
+    session: AsyncSession,
+    *,
+    task_id: str,
+) -> list[dict[str, Any]]:
+    result = await session.execute(
+        select(WikiPage)
+        .where(WikiPage.task_id == task_id)
+        .order_by(WikiPage.id.asc())
+    )
+    return [_wiki_to_list_item(page) for page in result.scalars().all()]
+
+
+async def get_wiki_page(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    wiki_id: int,
+) -> dict[str, Any] | None:
+    result = await session.execute(
+        select(WikiPage).where(
+            WikiPage.task_id == task_id,
+            WikiPage.id == wiki_id,
+        )
+    )
+    page = result.scalar_one_or_none()
+    if page is None:
+        return None
+
+    item = _wiki_to_list_item(page)
+    member_ids = item["member_chunk_ids"]
+    member_summaries: list[dict[str, Any]] = []
+    if member_ids:
+        chunk_result = await session.execute(
+            select(KnowledgeChunk).where(
+                KnowledgeChunk.task_id == task_id,
+                KnowledgeChunk.chunk_id.in_(member_ids),
+            )
+        )
+        by_id = {c.chunk_id: c for c in chunk_result.scalars().all()}
+        for chunk_id in member_ids:
+            chunk = by_id.get(chunk_id)
+            if chunk is None:
+                continue
+            member_summaries.append(
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "title": chunk.title,
+                    "summary": chunk.summary,
+                }
+            )
+    item["member_summaries"] = member_summaries
+    return item
+
+
+async def get_index_status(
+    session: AsyncSession,
+    *,
+    task_id: str,
+) -> dict[str, Any]:
+    index_status, incomplete = await _task_index_status(session, task_id)
+
+    chunk_result = await session.execute(
+        select(KnowledgeChunk).where(KnowledgeChunk.task_id == task_id)
+    )
+    chunks = list(chunk_result.scalars().all())
+    fine = sum(1 for c in chunks if c.segment_level == "fine")
+    large = sum(1 for c in chunks if c.segment_level == "large")
+    ready_embeddings = sum(1 for c in chunks if c.embedding_status == "ready")
+    total = len(chunks)
+    embedding_ready_ratio = (ready_embeddings / total) if total else 0.0
+
+    job_result = await session.execute(
+        select(IndexJob)
+        .where(IndexJob.task_id == task_id)
+        .order_by(IndexJob.id.asc())
+    )
+    jobs = list(job_result.scalars().all())
+
+    labels: dict[str, str] = {}
+    file_ids = {job.file_id for job in jobs}
+    if file_ids:
+        wf_result = await session.execute(
+            select(WorkspaceFile).where(
+                WorkspaceFile.task_id == task_id,
+                WorkspaceFile.id.in_(file_ids),
+            )
+        )
+        for wf in wf_result.scalars().all():
+            labels[wf.id] = wf.label
+
+    files = [
+        {
+            "file_id": job.file_id,
+            "label": labels.get(job.file_id),
+            "status": job.status,
+            "stage": job.stage,
+            "progress_done": job.progress_done,
+            "progress_total": job.progress_total,
+            "error_message": job.error_message,
+        }
+        for job in jobs
+    ]
+
+    fts_available = False
+    try:
+        await search_fts(session, task_id, "测", limit=1)
+        fts_available = True
+    except Exception:
+        fts_available = any(
+            c.segment_level == "fine" and c.index_status == "ready" for c in chunks
+        )
+
+    return {
+        "index_status": index_status,
+        "incomplete": incomplete,
+        "counts": {"fine": fine, "large": large},
+        "embedding_ready_ratio": embedding_ready_ratio,
+        "files": files,
+        "fts_available": fts_available,
+    }

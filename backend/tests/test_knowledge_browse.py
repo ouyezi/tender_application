@@ -157,3 +157,26 @@ async def test_list_chunks_q_matches_title_or_body(db_session, indexed_semantic_
         db_session, task_id=indexed_semantic_task, q="无理由", page=1, page_size=20
     )
     assert page["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_list_wiki_pages(db_session, indexed_semantic_task):
+    from app.services.retrieval.browse import list_wiki_pages
+
+    pages = await list_wiki_pages(db_session, task_id=indexed_semantic_task)
+    assert isinstance(pages, list)
+    assert pages  # stub wiki builder creates pages for tagged fines
+
+
+@pytest.mark.asyncio
+async def test_index_status_summary(db_session, indexed_semantic_task):
+    from app.services.retrieval.browse import get_index_status
+
+    status = await get_index_status(db_session, task_id=indexed_semantic_task)
+    assert status["index_status"] in ("ready", "partial", "unavailable")
+    assert "incomplete" in status
+    assert status["counts"]["fine"] >= 1
+    assert status["counts"]["large"] >= 1
+    assert status["files"]
+    assert "status" in status["files"][0]
+    assert "stage" in status["files"][0]
