@@ -56,6 +56,10 @@ export function stopTask(id) {
   return request(`/api/tasks/${id}/stop`, { method: 'POST' })
 }
 
+export function deleteTask(id) {
+  return request(`/api/tasks/${id}`, { method: 'DELETE' })
+}
+
 export function reportDocxUrl(id) {
   return `/api/tasks/${id}/report.docx`
 }
