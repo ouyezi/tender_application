@@ -16,10 +16,27 @@ from app.services.retrieval.provider import (
     _merge_channel_scores,
     _search_vector_channel,
     _task_index_status,
+    retrieve as provider_retrieve,
 )
 from app.services.retrieval.rerank import get_ai_reranker
 from app.services.retrieval.rewrite import get_query_rewriter
+from app.services.retrieval.tags import load_tag_catalog, validate_target_tags
 from app.services.retrieval.wiki import search_wiki
+
+_TYPED_MODES = frozenset({"full_document", "collection", "large_segments"})
+_VALID_FILE_ROLES = frozenset({"tender", "bid"})
+_SKIPPED_STAGES = ["rewrite", "vector", "keyword", "wiki", "ai_rerank"]
+_PATH_NOTES = {
+    "full_document": "full_document：直接读取整篇 markdown，未走查询重写与三路召回。",
+    "collection": "collection：按受控标签过滤，未走查询重写与三路召回。",
+    "large_segments": "large_segments：按文件角色取 large 段，未走查询重写与三路召回。",
+}
+
+
+class DebugConfigError(Exception):
+    def __init__(self, message: str, *, allowed_tags: list[str] | None = None):
+        super().__init__(message)
+        self.allowed_tags = allowed_tags or []
 
 
 def _parse_json_list(raw: str | None) -> list:
@@ -51,6 +68,73 @@ def _rewrite_trace(
     return payload
 
 
+def _precise_query_and_hints(
+    content_target: dict[str, Any],
+    item_hints: dict[str, Any] | None,
+) -> tuple[str, list[str]]:
+    query = str(content_target.get("query") or "").strip()
+    hints = [
+        str(h).strip()
+        for h in list((item_hints or {}).get("retrieval_hints") or [])
+        if str(h).strip()
+    ]
+    if not query and hints:
+        query = hints[0]
+    return query, hints
+
+
+async def _validate_typed_config(
+    session: AsyncSession,
+    content_source: str,
+    content_target: dict[str, Any],
+) -> None:
+    if content_source == "collection":
+        target_tags = list(content_target.get("target_tags") or [])
+        if not target_tags:
+            raise DebugConfigError("missing target_tags")
+        catalog = await load_tag_catalog(session)
+        allowed = sorted({row["name"] for row in catalog})
+        ok, err = validate_target_tags(target_tags, set(allowed))
+        if not ok:
+            raise DebugConfigError(err, allowed_tags=allowed)
+
+    if content_source in {"full_document", "large_segments"}:
+        file_role = content_target.get("file_role")
+        if file_role is not None and str(file_role).strip():
+            role = str(file_role).strip()
+            if role not in _VALID_FILE_ROLES:
+                raise DebugConfigError(
+                    f"invalid file_role: {role}; allowed: {sorted(_VALID_FILE_ROLES)}"
+                )
+
+
+async def _debug_typed_retrieve(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    content_source: str,
+    content_target: dict[str, Any],
+    item_hints: dict[str, Any] | None,
+) -> DebugRetrievalResult:
+    await _validate_typed_config(session, content_source, content_target)
+    result = await provider_retrieve(
+        session,
+        task_id=task_id,
+        content_source=content_source,
+        content_target=content_target,
+        item_hints=item_hints,
+    )
+    return DebugRetrievalResult(
+        mode=result.mode,
+        items=result.items,
+        index_status=result.index_status,
+        incomplete=result.incomplete,
+        error=result.error,
+        path_note=_PATH_NOTES[content_source],
+        trace=DebugTrace(skipped_stages=list(_SKIPPED_STAGES)),
+    )
+
+
 async def retrieve_debug(
     session: AsyncSession,
     *,
@@ -59,25 +143,34 @@ async def retrieve_debug(
     content_target: dict[str, Any],
     item_hints: dict[str, Any] | None = None,
 ) -> DebugRetrievalResult:
-    index_status, incomplete = await _task_index_status(session, task_id)
+    if not content_source:
+        raise DebugConfigError("missing content_source")
 
-    if content_source != "precise_search":
-        return DebugRetrievalResult(
-            mode=content_source or "",
-            items=[],
+    if content_source == "precise_search":
+        query, hints = _precise_query_and_hints(content_target, item_hints)
+        if not query and not hints:
+            raise DebugConfigError("missing query")
+        index_status, incomplete = await _task_index_status(session, task_id)
+        return await _debug_precise_search(
+            session,
+            task_id=task_id,
+            content_target=content_target,
+            item_hints=item_hints,
             index_status=index_status,
             incomplete=incomplete,
-            error="unsupported in task1",
+            query=query,
         )
 
-    return await _debug_precise_search(
-        session,
-        task_id=task_id,
-        content_target=content_target,
-        item_hints=item_hints,
-        index_status=index_status,
-        incomplete=incomplete,
-    )
+    if content_source in _TYPED_MODES:
+        return await _debug_typed_retrieve(
+            session,
+            task_id=task_id,
+            content_source=content_source,
+            content_target=content_target,
+            item_hints=item_hints,
+        )
+
+    raise DebugConfigError(f"unknown content_source: {content_source}")
 
 
 async def _debug_precise_search(
@@ -88,23 +181,14 @@ async def _debug_precise_search(
     item_hints: dict[str, Any] | None,
     index_status: str,
     incomplete: bool,
+    query: str,
 ) -> DebugRetrievalResult:
-    query = str(content_target.get("query") or "").strip()
+    del content_target  # query already resolved by caller
     hints = [
         str(h).strip()
         for h in list((item_hints or {}).get("retrieval_hints") or [])
         if str(h).strip()
     ]
-    if not query and hints:
-        query = hints[0]
-    if not query and not hints:
-        return DebugRetrievalResult(
-            mode="precise_search",
-            items=[],
-            index_status=index_status,
-            incomplete=incomplete,
-            error="missing query",
-        )
 
     degraded = False
     rewrite_error: str | None = None

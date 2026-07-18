@@ -12,7 +12,7 @@ from app.models import DiagnosisTask, WorkspaceFile
 from app.services import artifact, index_scheduler
 from app.services.parse.chunk import chunk_from_tree
 from app.services.parse.tree import build_document_tree
-from app.services.retrieval.debug import retrieve_debug
+from app.services.retrieval.debug import DebugConfigError, retrieve_debug
 from tests.stubs.retrieval_ai import apply_retrieval_ai_stubs
 
 
@@ -197,3 +197,46 @@ async def test_debug_precise_search_degrades_when_rewriter_raises(
     assert result.trace.ai_rerank.get("degraded_reason") is None
     # rewrite failed but rerank may still succeed on fallback query
     assert result.trace.ai_rerank["used"] is True
+
+
+@pytest.mark.asyncio
+async def test_debug_collection_path_note_no_trace_channels(
+    db_session, indexed_semantic_task
+):
+    result = await retrieve_debug(
+        db_session,
+        task_id=indexed_semantic_task,
+        content_source="collection",
+        content_target={"target_tags": ["退款政策"]},
+    )
+    assert result.mode == "collection"
+    assert (
+        "三路" in result.path_note
+        or "precise_search" in result.path_note.lower()
+        or "未走" in result.path_note
+    )
+    assert result.trace is None or result.trace.skipped_stages
+
+
+@pytest.mark.asyncio
+async def test_debug_missing_query_is_config_error(db_session, indexed_semantic_task):
+    with pytest.raises(DebugConfigError) as ei:
+        await retrieve_debug(
+            db_session,
+            task_id=indexed_semantic_task,
+            content_source="precise_search",
+            content_target={},
+        )
+    assert "query" in str(ei.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_debug_invalid_tag_is_config_error(db_session, indexed_semantic_task):
+    with pytest.raises(DebugConfigError) as ei:
+        await retrieve_debug(
+            db_session,
+            task_id=indexed_semantic_task,
+            content_source="collection",
+            content_target={"target_tags": ["不是合法标签xyz"]},
+        )
+    assert ei.value.allowed_tags  # list of legal names
