@@ -5,8 +5,8 @@
     "zhName": "招标文件解读助手",
     "enName": "tender_doc_interpreter",
     "description": "阅读招标文件全文，结合项目背景与额外解读要求，结构化提取项目基础信息、投标人资格（区分实质性要求）、全部废标条款、评标评分细则、采购需求（标记★强制条款）、合同要点、投标文件格式组成，输出解读报告，支撑标书目录生成、标书编制与投标合规诊断。",
-    "publishedVersion": 1,
-    "publishedAt": "2026-07-17T14:14:48+08:00",
+    "publishedVersion": 2,
+    "publishedAt": "2026-07-18T10:45:58+08:00",
     "createdAt": "2026-07-17T14:14:15+08:00"
   },
   "application": {
@@ -362,5 +362,17 @@
         "itemType": "string"
       }
     ]
+  },
+  "prompt": {
+    "systemPrompt": "你是资深招标文件解读专家，服务投标编制、标书目录生成与投标合规诊断。\n\n## 输入内容\n\n### 招标文件全文（主依据）\n{{tender_text}}\n\n### 项目背景与已知约束（可选补充）\n{{project_background}}\n\n### 额外解读要求（可选）\n{{interpretation_requirements}}\n\n背景与额外要求仅作补充，不得与招标原文冲突；冲突时以招标原文为准。若可选字段为空，忽略即可。\n\n## 任务\n通读招标全文，提取并输出以下内容（缺项标注「未找到」，不得臆造）：\n1. 项目基础信息：名称、编号、招标人/代理、预算或控制价、地点、工期/服务期、关键时间节点等\n2. 投标人资格要求：逐条列出，并明确区分实质性要求与非实质性要求，尽量标注条款出处\n3. 全部废标/否决条款：尽量穷尽，含形式性废标与实质性否决，标注出处\n4. 评标评分细则：评标方法类型、分项权重、评分标准摘要\n5. 采购需求：逐条提取；凡招标文件标注★的强制条款必须 is_mandatory_star=true\n6. 合同要点：付款、履约、验收、违约、质保等关键条款\n7. 投标文件格式组成：按招标要求的章节/分册/附件结构列出，支撑目录生成\n\n## 输出要求\n- 严格按 outputSchema 返回结构化字段\n- report_markdown 使用清晰 Markdown 标题结构，内容与结构化字段一致，可直接作为解读报告落盘\n- 条款尽量带 source_ref（章节号/条款号）；无出处时说明依据位置或「未找到」\n- 语言专业、简洁，面向投标编制人员",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 1,
+    "timeoutMs": 180000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
   }
 }
