@@ -1,0 +1,463 @@
+{
+  "agent": {
+    "id": "agt_70ceeeb4",
+    "code": "agent_044",
+    "zhName": "招标诊断检查项生成助手",
+    "enName": "tender_checklist_generator",
+    "description": "基于解读报告、管理配置参考与招标正文分片，生成近终态诊断检查项（分类+条目），供标书合规诊断使用。",
+    "publishedVersion": 1,
+    "publishedAt": "2026-07-18T09:50:04+08:00",
+    "createdAt": "2026-07-18T09:49:37+08:00"
+  },
+  "application": {
+    "id": "app_8476c6d3",
+    "name": "招标诊断检查项生成",
+    "enName": "tender_checklist_generator_app",
+    "agentId": "agt_70ceeeb4",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 180000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "published",
+    "publishedAt": "2026-07-18T09:50:10+08:00"
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "tender_checklist_generator_app",
+    "requiredInputs": [
+      "system_instructions",
+      "interpret_report",
+      "admin_config",
+      "tender_segment"
+    ],
+    "optionalInputs": []
+  },
+  "model": {
+    "modelId": "mdl_544a969b",
+    "modelName": "qwen3.7-max",
+    "temperature": 0.3,
+    "thinking": true
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_system_instructions",
+        "name": "system_instructions",
+        "description": "固定生成规则与输出 schema 约束",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_interpret_report",
+        "name": "interpret_report",
+        "description": "完整解读报告 Markdown",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_admin_config",
+        "name": "admin_config",
+        "description": "管理端配置 JSON 字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_tender_segment",
+        "name": "tender_segment",
+        "description": "当前招标正文分片",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": [
+      {
+        "id": "f_schema_version",
+        "name": "schema_version",
+        "description": "检查项 schema 版本，固定为 1",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_categories",
+        "name": "categories",
+        "description": "动态分类列表",
+        "type": "array",
+        "required": true,
+        "children": [
+          {
+            "id": "f_cat_id",
+            "name": "id",
+            "description": "分类本地 ID",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_cat_name",
+            "name": "name",
+            "description": "动态分类名称",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_cat_desc",
+            "name": "description",
+            "description": "分类描述",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_cat_rq",
+            "name": "retrieval_query",
+            "description": "分类级检索查询",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_cat_loc",
+            "name": "expected_locations",
+            "description": "预计标书位置",
+            "type": "array",
+            "required": true,
+            "children": [
+              {
+                "id": "f_cat_loc_item",
+                "name": "item",
+                "description": "位置描述",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              }
+            ],
+            "itemType": "string"
+          },
+          {
+            "id": "f_cat_sort",
+            "name": "sort_order",
+            "description": "排序",
+            "type": "number",
+            "required": true,
+            "children": null,
+            "itemType": null
+          }
+        ],
+        "itemType": "object"
+      },
+      {
+        "id": "f_items",
+        "name": "items",
+        "description": "检查项列表",
+        "type": "array",
+        "required": true,
+        "children": [
+          {
+            "id": "f_item_id",
+            "name": "id",
+            "description": "检查项本地 ID",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_item_cid",
+            "name": "category_id",
+            "description": "所属分类 ID",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_item_title",
+            "name": "title",
+            "description": "诊断标题",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_item_req",
+            "name": "requirement",
+            "description": "诊断要求",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_item_tech",
+            "name": "technique",
+            "description": "诊断技巧",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_item_imp",
+            "name": "importance",
+            "description": "重要性 high|medium|low",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_item_src",
+            "name": "source_references",
+            "description": "招标依据与定位",
+            "type": "array",
+            "required": true,
+            "children": [
+              {
+                "id": "f_src_section",
+                "name": "section",
+                "description": "章节/段落",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_src_start",
+                "name": "start",
+                "description": "分片内起始偏移",
+                "type": "number",
+                "required": true,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_src_end",
+                "name": "end",
+                "description": "分片内结束偏移",
+                "type": "number",
+                "required": true,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_src_seg",
+                "name": "segment_index",
+                "description": "分片序号",
+                "type": "number",
+                "required": true,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_src_coord",
+                "name": "coordinate_space",
+                "description": "坐标空间，固定 segment",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              }
+            ],
+            "itemType": "object"
+          },
+          {
+            "id": "f_item_hints",
+            "name": "retrieval_hints",
+            "description": "检索提示",
+            "type": "array",
+            "required": true,
+            "children": [
+              {
+                "id": "f_hint_item",
+                "name": "item",
+                "description": "关键词或同义表达",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              }
+            ],
+            "itemType": "string"
+          },
+          {
+            "id": "f_item_ev",
+            "name": "expected_evidence",
+            "description": "预期证据",
+            "type": "array",
+            "required": true,
+            "children": [
+              {
+                "id": "f_ev_item",
+                "name": "item",
+                "description": "证据描述",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              }
+            ],
+            "itemType": "string"
+          },
+          {
+            "id": "f_item_comp",
+            "name": "compliance_rules",
+            "description": "符合性判定规则",
+            "type": "object",
+            "required": true,
+            "children": [
+              {
+                "id": "f_comp_sat",
+                "name": "satisfied",
+                "description": "满足",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_comp_vio",
+                "name": "violated",
+                "description": "违反",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_comp_can",
+                "name": "cannot_satisfy",
+                "description": "不能满足",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_comp_ins",
+                "name": "insufficient_evidence",
+                "description": "证据不足",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              }
+            ],
+            "itemType": null
+          },
+          {
+            "id": "f_item_cons",
+            "name": "consequence_rules",
+            "description": "后果判定规则",
+            "type": "object",
+            "required": true,
+            "children": [
+              {
+                "id": "f_cons_ns",
+                "name": "no_score",
+                "description": "无法得分",
+                "type": "string",
+                "required": false,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_cons_bu",
+                "name": "bid_unusable",
+                "description": "废标/标书不可用",
+                "type": "string",
+                "required": false,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_cons_sr",
+                "name": "score_risk",
+                "description": "扣分风险",
+                "type": "string",
+                "required": false,
+                "children": null,
+                "itemType": null
+              },
+              {
+                "id": "f_cons_gr",
+                "name": "general_risk",
+                "description": "一般风险",
+                "type": "string",
+                "required": false,
+                "children": null,
+                "itemType": null
+              }
+            ],
+            "itemType": null
+          },
+          {
+            "id": "f_item_admin",
+            "name": "admin_config_refs",
+            "description": "相关管理配置 ID",
+            "type": "array",
+            "required": false,
+            "children": [
+              {
+                "id": "f_admin_item",
+                "name": "item",
+                "description": "配置 ID",
+                "type": "number",
+                "required": true,
+                "children": null,
+                "itemType": null
+              }
+            ],
+            "itemType": "number"
+          },
+          {
+            "id": "f_item_sort",
+            "name": "sort_order",
+            "description": "排序",
+            "type": "number",
+            "required": true,
+            "children": null,
+            "itemType": null
+          }
+        ],
+        "itemType": "object"
+      }
+    ]
+  },
+  "prompt": {
+    "systemPrompt": "你是招标诊断检查项生成助手。\n\n你将收到四个输入字段：\n- system_instructions：固定生成规则与输出 schema 约束（各次调用相同）\n- interpret_report：完整招标文件解读报告（Markdown）\n- admin_config：管理端诊断配置 JSON 字符串（软性参考，可采纳/合并/忽略）\n- tender_segment：当前招标正文分片（短文档则为全文）\n\n职责：\n1. 只基于 tender_segment 生成本分片的近终态检查项清单；禁止无招标依据的推断。\n2. 可参考 interpret_report 与 admin_config 理解背景，但每条检查项必须能在本分片正文中追溯。\n3. 每条检查项只描述一个可独立判断的要点，填写 title、requirement、technique、importance。\n4. importance 只能是 high|medium|low。\n5. compliance_rules 必须包含键：satisfied、violated、cannot_satisfy、insufficient_evidence，值为非空字符串。\n6. consequence_rules 的键只能来自：no_score、bid_unusable、score_risk、general_risk。\n7. source_references 必须含 coordinate_space=\"segment\"、segment_index、start、end、section，且 start/end 偏移落在本分片内；segment_index 与调用上下文一致（由输入分片位置决定，通常从 0 起）。\n8. 按预计命中的标书内容位置动态分类，输出 categories 与 items；items.category_id 必须引用本响应 categories 中的 id。\n9. schema_version 必须为 \"1\"。\n10. 严格输出符合 outputSchema 的 JSON 对象，不要输出额外说明文字。\n\n同时遵守 system_instructions 中的规则；若有冲突，以可追溯性与 schema 完整性为优先。",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 0,
+    "timeoutMs": 180000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
+  }
+}
