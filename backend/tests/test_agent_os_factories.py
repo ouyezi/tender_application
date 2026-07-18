@@ -20,6 +20,17 @@ def test_factories_default_to_mock_implementations():
 
 def test_agent_os_enricher_requires_client(monkeypatch):
     monkeypatch.setattr("app.config.AGENT_CHUNK_ENRICHER", "agent_os")
+
+    def _raise_unavailable():
+        raise ImportError(
+            "Agent OS client is unavailable. Set AGENT_CHUNK_ENRICHER=mock or "
+            "install the agent-os interpretation client first."
+        )
+
+    monkeypatch.setattr(
+        "app.services.retrieval.enricher_agent_os._require_agent_os_client",
+        _raise_unavailable,
+    )
     with pytest.raises(ImportError, match="Agent OS client is unavailable"):
         get_chunk_enricher()
 
@@ -27,6 +38,17 @@ def test_agent_os_enricher_requires_client(monkeypatch):
 @pytest.mark.asyncio
 async def test_agent_os_query_rewriter_requires_client(monkeypatch):
     monkeypatch.setattr("app.config.AGENT_QUERY_REWRITER", "agent_os")
+
+    def _raise_unavailable():
+        raise ImportError(
+            "Agent OS client is unavailable. Set AGENT_QUERY_REWRITER=mock or "
+            "install the agent-os interpretation client first."
+        )
+
+    monkeypatch.setattr(
+        "app.services.retrieval.rewrite_agent_os._require_agent_os_client",
+        _raise_unavailable,
+    )
     rewriter = get_query_rewriter()
     with pytest.raises(ImportError, match="Agent OS client is unavailable"):
         await rewriter.rewrite("退款", hints=["七天无理由"])
