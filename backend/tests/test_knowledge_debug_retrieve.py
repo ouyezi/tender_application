@@ -171,3 +171,29 @@ async def test_debug_precise_search_degrades_when_reranker_raises(
     assert result.trace.ai_rerank["used"] is False
     assert result.trace.ai_rerank.get("degraded_reason")  # must explain failure
     assert result.items  # still returns merged ranking
+
+
+@pytest.mark.asyncio
+async def test_debug_precise_search_degrades_when_rewriter_raises(
+    db_session, indexed_semantic_task, monkeypatch
+):
+    class Boom:
+        async def rewrite(self, query, hints=None):
+            raise RuntimeError("rewrite down")
+
+    monkeypatch.setattr(
+        "app.services.retrieval.debug.get_query_rewriter", lambda: Boom()
+    )
+    result = await retrieve_debug(
+        db_session,
+        task_id=indexed_semantic_task,
+        content_source="precise_search",
+        content_target={"query": "是否支持七天无理由退货"},
+        item_hints={"retrieval_hints": ["售后", "退款政策"]},
+    )
+    assert result.degraded is True
+    assert result.items  # fallback raw query still recalls
+    assert "rewrite" in (result.trace.rewrite.get("degraded_reason") or "").lower()
+    assert result.trace.ai_rerank.get("degraded_reason") is None
+    # rewrite failed but rerank may still succeed on fallback query
+    assert result.trace.ai_rerank["used"] is True

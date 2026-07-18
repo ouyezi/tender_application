@@ -32,6 +32,25 @@ def _parse_json_list(raw: str | None) -> list:
     return data if isinstance(data, list) else []
 
 
+def _rewrite_trace(
+    *,
+    vector_query: str,
+    keywords: list[str],
+    wiki_query: str,
+    rewrite: dict[str, Any],
+    rewrite_error: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "vector_query": vector_query,
+        "keywords": keywords,
+        "wiki_query": wiki_query,
+        "raw": rewrite,
+    }
+    if rewrite_error:
+        payload["degraded_reason"] = rewrite_error
+    return payload
+
+
 async def retrieve_debug(
     session: AsyncSession,
     *,
@@ -94,10 +113,11 @@ async def _debug_precise_search(
     except Exception as exc:  # noqa: BLE001 — debug path degrades on AI failure
         degraded = True
         rewrite_error = f"rewrite failed: {exc}"
+        # Raw-query fallback: keep hints for keyword/wiki so recall can still hit.
         rewrite = {
             "vector_query": query,
             "keywords": hints or [query],
-            "wiki_query": query,
+            "wiki_query": " ".join(hints) if hints else query,
         }
 
     vector_query = str(rewrite.get("vector_query") or query)
@@ -168,12 +188,13 @@ async def _debug_precise_search(
             error=rewrite_error,
             path_note="precise_search: rewrite → three-channel recall → merge → rerank → expand",
             trace=DebugTrace(
-                rewrite={
-                    "vector_query": vector_query,
-                    "keywords": keywords,
-                    "wiki_query": wiki_query,
-                    "raw": rewrite,
-                },
+                rewrite=_rewrite_trace(
+                    vector_query=vector_query,
+                    keywords=keywords,
+                    wiki_query=wiki_query,
+                    rewrite=rewrite,
+                    rewrite_error=rewrite_error,
+                ),
                 channels=channels,
                 merged=[],
                 pre_rerank_order=[],
@@ -182,11 +203,6 @@ async def _debug_precise_search(
                     "used": False,
                     "scores_or_ranks": [],
                     "rationale": None,
-                    **(
-                        {"degraded_reason": rewrite_error}
-                        if rewrite_error
-                        else {}
-                    ),
                 },
                 expansions=[],
             ),
@@ -235,8 +251,6 @@ async def _debug_precise_search(
         "scores_or_ranks": [],
         "rationale": None,
     }
-    if rewrite_error:
-        ai_rerank_info["degraded_reason"] = rewrite_error
 
     post_rerank_order = list(pre_rerank_order)
     if candidate_hits:
@@ -334,12 +348,13 @@ async def _debug_precise_search(
         error=rewrite_error,
         path_note="precise_search: rewrite → three-channel recall → merge → rerank → expand",
         trace=DebugTrace(
-            rewrite={
-                "vector_query": vector_query,
-                "keywords": keywords,
-                "wiki_query": wiki_query,
-                "raw": rewrite,
-            },
+            rewrite=_rewrite_trace(
+                vector_query=vector_query,
+                keywords=keywords,
+                wiki_query=wiki_query,
+                rewrite=rewrite,
+                rewrite_error=rewrite_error,
+            ),
             channels=channels,
             merged=merged_trace,
             pre_rerank_order=pre_rerank_order,
