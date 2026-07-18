@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -13,6 +14,12 @@ from app.services.retrieval.provider import _task_index_status
 
 TEXT_PREVIEW_LIMIT = 4000
 _FTS_BROWSE_LIMIT = 5000
+
+
+def _dt_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
 
 
 def _parse_json_list(raw: str | None) -> list:
@@ -307,6 +314,9 @@ async def get_index_status(
             "progress_done": job.progress_done,
             "progress_total": job.progress_total,
             "error_message": job.error_message,
+            "created_at": _dt_iso(job.created_at),
+            "started_at": _dt_iso(job.started_at),
+            "finished_at": _dt_iso(job.finished_at),
         }
         for job in jobs
     ]

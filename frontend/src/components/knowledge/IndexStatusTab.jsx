@@ -12,6 +12,26 @@ function progressLabel(file) {
   return `${done ?? 0} / ${total ?? '—'}`
 }
 
+function formatDate(value) {
+  if (!value) return '—'
+  try {
+    return new Date(value).toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  } catch {
+    return String(value)
+  }
+}
+
+function jobTime(file) {
+  return file.finished_at || file.started_at || file.created_at || null
+}
+
 function rowClass(status) {
   if (status === 'failed' || status === 'partial') return `index-file-row index-file-${status}`
   return 'index-file-row'
@@ -74,13 +94,14 @@ export default function IndexStatusTab({ taskId, status, loading, error, onRefre
                   <th>status</th>
                   <th>stage</th>
                   <th>progress</th>
+                  <th>时间</th>
                   <th>error</th>
                 </tr>
               </thead>
               <tbody>
                 {files.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="empty-state-hint">
+                    <td colSpan={6} className="empty-state-hint">
                       无索引任务记录
                     </td>
                   </tr>
@@ -97,6 +118,7 @@ export default function IndexStatusTab({ taskId, status, loading, error, onRefre
                       <td>{file.status || '—'}</td>
                       <td>{file.stage || '—'}</td>
                       <td>{progressLabel(file)}</td>
+                      <td className="admin-task-time">{formatDate(jobTime(file))}</td>
                       <td className="index-file-error" title={file.error_message || ''}>
                         {file.error_message || '—'}
                       </td>

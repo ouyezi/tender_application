@@ -180,3 +180,5 @@ async def test_index_status_summary(db_session, indexed_semantic_task):
     assert status["files"]
     assert "status" in status["files"][0]
     assert "stage" in status["files"][0]
+    file0 = status["files"][0]
+    assert any(k in file0 for k in ("created_at", "started_at", "finished_at"))
