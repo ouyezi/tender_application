@@ -40,7 +40,8 @@
   "model": {
     "modelId": "mdl_544a969b",
     "temperature": 0.3,
-    "thinking": false
+    "thinking": false,
+    "modelName": "qwen3.7-max"
   },
   "io": {
     "formatInput": true,

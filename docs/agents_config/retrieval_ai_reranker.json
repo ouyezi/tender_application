@@ -39,7 +39,8 @@
   "model": {
     "modelId": "mdl_780e2fbe",
     "temperature": 0.2,
-    "thinking": false
+    "thinking": false,
+    "modelName": "qwen3.6-flash"
   },
   "io": {
     "formatInput": true,
