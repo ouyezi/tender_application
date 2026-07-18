@@ -5,8 +5,8 @@
     "zhName": "知识块富化打标助手",
     "enName": "retrieval_chunk_enricher",
     "description": "为工作区知识块生成标题、概要、描述，并将标签映射到受控词表，供文档检索索引使用。",
-    "publishedVersion": 1,
-    "publishedAt": "2026-07-18T11:27:38+08:00",
+    "publishedVersion": 2,
+    "publishedAt": "2026-07-18T11:39:27+08:00",
     "createdAt": "2026-07-18T11:27:08+08:00"
   },
   "application": {

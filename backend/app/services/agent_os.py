@@ -196,6 +196,11 @@ class AgentOSClient:
                         app_name=app_name,
                         status_code=response.status_code,
                     )
+                # Production invoke wraps business fields in structuredOutput when
+                # formatOutput is enabled; adapters expect the inner object.
+                structured = payload.get("structuredOutput")
+                if isinstance(structured, dict):
+                    return structured
                 return payload
         raise last_error or AgentOSError(
             f"Agent OS invoke failed for app {app_name}",

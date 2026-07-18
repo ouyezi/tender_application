@@ -5,8 +5,8 @@
     "zhName": "检索 Wiki 页文案助手",
     "enName": "retrieval_wiki_writer",
     "description": "根据后端按受控标签聚合的成员块摘要，生成 Wiki 主题页的标题、概要与描述。",
-    "publishedVersion": 1,
-    "publishedAt": "2026-07-18T11:27:38+08:00",
+    "publishedVersion": 2,
+    "publishedAt": "2026-07-18T11:39:27+08:00",
     "createdAt": "2026-07-18T11:27:08+08:00"
   },
   "application": {

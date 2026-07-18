@@ -5,8 +5,8 @@
     "zhName": "精确检索查询重写助手",
     "enName": "retrieval_query_rewriter",
     "description": "将诊断精确查找问题重写为向量查询句、关键字列表与 Wiki 主题查询。",
-    "publishedVersion": 1,
-    "publishedAt": "2026-07-18T11:27:38+08:00",
+    "publishedVersion": 2,
+    "publishedAt": "2026-07-18T11:39:27+08:00",
     "createdAt": "2026-07-18T11:27:08+08:00"
   },
   "application": {

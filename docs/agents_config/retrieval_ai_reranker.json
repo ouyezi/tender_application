@@ -5,8 +5,8 @@
     "zhName": "精确检索 AI 重排助手",
     "enName": "retrieval_ai_reranker",
     "description": "依据查找要求对候选知识块的标题与概要重排，返回 chunk_id 降序列表。",
-    "publishedVersion": 1,
-    "publishedAt": "2026-07-18T11:27:38+08:00",
+    "publishedVersion": 3,
+    "publishedAt": "2026-07-18T11:39:59+08:00",
     "createdAt": "2026-07-18T11:27:08+08:00"
   },
   "application": {
@@ -37,10 +37,10 @@
     "optionalInputs": []
   },
   "model": {
-    "modelId": "mdl_780e2fbe",
+    "modelId": "mdl_544a969b",
     "temperature": 0.2,
     "thinking": false,
-    "modelName": "qwen3.6-flash"
+    "modelName": "qwen3.7-max"
   },
   "io": {
     "formatInput": true,
