@@ -1,0 +1,12 @@
+{
+  "agentOs": {
+    "baseUrl": "http://localhost:8000",
+    "timeoutSeconds": 180,
+    "maxAttempts": 3,
+    "auth": {
+      "cookie": "",
+      "headerName": "",
+      "headerValue": ""
+    }
+  }
+}
