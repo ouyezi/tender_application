@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { getKnowledgeIndexStatus } from '../api'
 import ChunksTab from '../components/knowledge/ChunksTab'
+import IndexStatusTab from '../components/knowledge/IndexStatusTab'
 import RetrieveTab from '../components/knowledge/RetrieveTab'
+import WikiTab from '../components/knowledge/WikiTab'
 
 const TABS = [
   { id: 'chunks', label: '知识块' },
@@ -12,14 +14,6 @@ const TABS = [
 ]
 
 const VALID_TABS = new Set(TABS.map((t) => t.id))
-
-function WikiTab() {
-  return <p>Wiki</p>
-}
-
-function IndexTab() {
-  return <p>索引状态</p>
-}
 
 export default function KnowledgeDebugPage() {
   const { taskId } = useParams()
@@ -119,8 +113,16 @@ export default function KnowledgeDebugPage() {
       <section className="detail-section knowledge-tab-panel">
         {tab === 'chunks' && <ChunksTab taskId={taskId} />}
         {tab === 'retrieve' && <RetrieveTab taskId={taskId} />}
-        {tab === 'wiki' && <WikiTab />}
-        {tab === 'index' && <IndexTab />}
+        {tab === 'wiki' && <WikiTab taskId={taskId} />}
+        {tab === 'index' && (
+          <IndexStatusTab
+            taskId={taskId}
+            status={status}
+            loading={loading}
+            error={error}
+            onRefresh={loadStatus}
+          />
+        )}
       </section>
     </main>
   )
