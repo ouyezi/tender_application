@@ -188,7 +188,6 @@ export default function RetrieveTab({ taskId }) {
       const data = await debugKnowledgeRetrieve(taskId, body)
       setResponse(data)
     } catch (err) {
-      setResponse(null)
       setError(formatApiError(err))
     } finally {
       setLoading(false)

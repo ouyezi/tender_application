@@ -129,6 +129,7 @@ async def _debug_typed_retrieve(
         items=result.items,
         index_status=result.index_status,
         incomplete=result.incomplete,
+        degraded=result.degraded,
         error=result.error,
         path_note=_PATH_NOTES[content_source],
         trace=DebugTrace(skipped_stages=list(_SKIPPED_STAGES)),

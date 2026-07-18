@@ -93,6 +93,7 @@ export default function WikiTab({ taskId }) {
                     <span className="wiki-list-title">{page.title || `Wiki #${page.wiki_id}`}</span>
                     <span className="wiki-list-meta">
                       {(page.member_chunk_ids || []).length} 成员 · {formatTags(page.tags)}
+                      {page.updated_at ? ` · ${page.updated_at}` : ''}
                     </span>
                   </button>
                 </li>

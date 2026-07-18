@@ -150,6 +150,15 @@ async def test_get_chunk_detail_includes_text(db_session, indexed_semantic_task)
 
 
 @pytest.mark.asyncio
+async def test_get_chunk_cross_task_returns_none(db_session, indexed_semantic_task):
+    from app.services.retrieval.browse import list_chunks, get_chunk
+
+    page = await list_chunks(db_session, task_id=indexed_semantic_task, page=1, page_size=1)
+    chunk_id = page["items"][0]["chunk_id"]
+    assert await get_chunk(db_session, task_id="T-other", chunk_id=chunk_id) is None
+
+
+@pytest.mark.asyncio
 async def test_list_chunks_q_matches_title_or_body(db_session, indexed_semantic_task):
     from app.services.retrieval.browse import list_chunks
 
@@ -166,6 +175,7 @@ async def test_list_wiki_pages(db_session, indexed_semantic_task):
     pages = await list_wiki_pages(db_session, task_id=indexed_semantic_task)
     assert isinstance(pages, list)
     assert pages  # stub wiki builder creates pages for tagged fines
+    assert pages[0].get("updated_at")
 
 
 @pytest.mark.asyncio

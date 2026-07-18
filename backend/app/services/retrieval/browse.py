@@ -211,6 +211,7 @@ def _wiki_to_list_item(page: WikiPage) -> dict[str, Any]:
         "description": page.description,
         "tags": _parse_json_list(page.tags),
         "member_chunk_ids": _parse_json_list(page.member_chunk_ids),
+        "updated_at": _dt_iso(page.updated_at),
     }
 
 

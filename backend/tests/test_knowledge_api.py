@@ -178,3 +178,36 @@ async def test_api_chunks_and_debug_retrieve(api_client, indexed_task_id):
 async def test_api_task_not_found(api_client):
     r = await api_client.get("/api/workspaces/T-missing/knowledge/chunks")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_chunk_cross_task_404(api_client, indexed_task_id):
+    from app.db import SessionLocal
+
+    r = await api_client.get(
+        f"/api/workspaces/{indexed_task_id}/knowledge/chunks"
+    )
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert items
+    chunk_id = items[0]["chunk_id"]
+
+    other_id = "T-API-OTHER"
+    async with SessionLocal() as session:
+        session.add(
+            DiagnosisTask(
+                id=other_id,
+                tender_filename="tender.docx",
+                tender_path="/tmp/tender.docx",
+                bid_filename="bid.docx",
+                bid_path="/tmp/bid.docx",
+                config_snapshot="[]",
+            )
+        )
+        await session.commit()
+
+    r = await api_client.get(
+        f"/api/workspaces/{other_id}/knowledge/chunks/{chunk_id}"
+    )
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Chunk not found"
