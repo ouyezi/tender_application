@@ -1,0 +1,109 @@
+{
+  "agent": {
+    "id": "agt_5a7a8d88",
+    "code": "agent_047",
+    "zhName": "精确检索查询重写助手",
+    "enName": "retrieval_query_rewriter",
+    "description": "将诊断精确查找问题重写为向量查询句、关键字列表与 Wiki 主题查询。",
+    "publishedVersion": 1,
+    "publishedAt": "2026-07-18T11:27:38+08:00",
+    "createdAt": "2026-07-18T11:27:08+08:00"
+  },
+  "application": {
+    "id": "app_e29ea86c",
+    "name": "精确检索查询重写",
+    "enName": "retrieval_query_rewriter_app",
+    "agentId": "agt_5a7a8d88",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 60000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "published",
+    "publishedAt": "2026-07-18T11:27:38+08:00"
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "retrieval_query_rewriter_app",
+    "requiredInputs": [
+      "query",
+      "hints_json"
+    ],
+    "optionalInputs": []
+  },
+  "model": {
+    "modelId": "mdl_544a969b",
+    "temperature": 0.3,
+    "thinking": false
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_query",
+        "name": "query",
+        "description": "原始查找问题",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_hints_json",
+        "name": "hints_json",
+        "description": "提示 JSON 数组字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": [
+      {
+        "id": "f_vector_query",
+        "name": "vector_query",
+        "description": "向量召回查询句",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_keywords_json",
+        "name": "keywords_json",
+        "description": "关键字 JSON 数组字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_wiki_query",
+        "name": "wiki_query",
+        "description": "Wiki 主题查询",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ]
+  },
+  "prompt": {
+    "systemPrompt": "你是招标诊断精确检索的「查询重写」助手。\n\n输入：\n- query：原始查找问题\n- hints_json：补充提示 JSON 字符串数组（可能为空数组）\n\n输出（均必填）：\n- vector_query：适合向量召回的完整语义句子\n- keywords_json：关键字字符串数组的 JSON 字符串\n- wiki_query：适合匹配预生成 Wiki 主题/标签的查询（可为受控主题名，如「退款政策」）\n\n要求：服务标书合规诊断场景；不要回答问题本身；不要输出解释性自然语言。",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 0,
+    "timeoutMs": 60000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
+  }
+}

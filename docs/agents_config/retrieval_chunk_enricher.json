@@ -1,0 +1,101 @@
+{
+  "agent": {
+    "id": "agt_4aeea78d",
+    "code": "agent_045",
+    "zhName": "知识块富化打标助手",
+    "enName": "retrieval_chunk_enricher",
+    "description": "为工作区知识块生成标题、概要、描述，并将标签映射到受控词表，供文档检索索引使用。",
+    "publishedVersion": 1,
+    "publishedAt": "2026-07-18T11:27:38+08:00",
+    "createdAt": "2026-07-18T11:27:08+08:00"
+  },
+  "application": {
+    "id": "app_0126d8fb",
+    "name": "知识块富化打标",
+    "enName": "retrieval_chunk_enricher_app",
+    "agentId": "agt_4aeea78d",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 180000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "published",
+    "publishedAt": "2026-07-18T11:27:38+08:00"
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "retrieval_chunk_enricher_app",
+    "requiredInputs": [
+      "task_id",
+      "catalog_json",
+      "segments_json"
+    ],
+    "optionalInputs": []
+  },
+  "model": {
+    "modelId": "mdl_544a969b",
+    "temperature": 0.3,
+    "thinking": false
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_task_id",
+        "name": "task_id",
+        "description": "工作区任务 ID",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_catalog_json",
+        "name": "catalog_json",
+        "description": "受控词表 JSON 字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_segments_json",
+        "name": "segments_json",
+        "description": "本批段落 JSON 字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": [
+      {
+        "id": "f_segments_json_out",
+        "name": "segments_json",
+        "description": "富化结果 JSON 字符串：[{chunk_id,title,summary,description,tags:[{name,confidence}]}]",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ]
+  },
+  "prompt": {
+    "systemPrompt": "你是招标工作区文档检索链路中的「知识块富化打标」助手。\n\n输入字段：\n- task_id：任务 ID（仅供上下文，不要编造与任务无关的内容）\n- catalog_json：受控标签词表 JSON 数组，元素含 name / aliases /（可选）description\n- segments_json：待富化段落 JSON 数组，元素含 chunk_id / title_path / text / segment_level\n\n要求：\n1. 仅为 segments_json 中的每一个 chunk_id 产出一条结果，不得增删 chunk_id。\n2. 为每段生成 title、summary、description。\n3. tags 只能使用 catalog_json 中的规范 name（可通过 aliases 映射）；每条 tag 含 name 与 confidence(0~1)。无把握可不打标签。\n4. 输出必须且仅包含 output schema 字段：segments_json（字符串，内容为 JSON 数组）。\n5. 不要输出解释性自然语言。",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 0,
+    "timeoutMs": 180000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
+  }
+}
