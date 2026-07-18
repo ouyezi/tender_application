@@ -1,5 +1,8 @@
 import json
 
+import httpx
+import pytest
+
 from app.services import agent_os
 
 
@@ -76,3 +79,67 @@ def test_load_settings_missing_base_url_is_empty(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     settings = agent_os.load_settings()
     assert settings.base_url == ""
+
+
+@pytest.mark.asyncio
+async def test_invoke_app_posts_app_name_and_input(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
+    monkeypatch.setenv("AGENT_OS_BASE_URL", "http://agent-os.test")
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["json"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"schema_version": "1", "categories": [], "items": []})
+
+    client = agent_os.AgentOSClient(transport=httpx.MockTransport(handler))
+    result = await client.invoke_app(
+        "tender_checklist_generator_app",
+        {"tender_segment": "正文"},
+    )
+    assert captured["url"] == "http://agent-os.test/v1/apps/invoke"
+    assert captured["json"]["appName"] == "tender_checklist_generator_app"
+    assert captured["json"]["input"]["tender_segment"] == "正文"
+    assert result["schema_version"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_invoke_app_retries_retryable_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
+    monkeypatch.setenv("AGENT_OS_BASE_URL", "http://agent-os.test")
+    monkeypatch.setenv("AGENT_OS_MAX_ATTEMPTS", "3")
+    monkeypatch.setattr(agent_os, "_backoff_seconds", lambda attempt: 0)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(503, json={"error": "busy"})
+        return httpx.Response(200, json={"ok": True})
+
+    client = agent_os.AgentOSClient(transport=httpx.MockTransport(handler))
+    result = await client.invoke_app("demo_app", {"q": "1"})
+    assert result == {"ok": True}
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_invoke_app_missing_base_url_raises_config_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
+    monkeypatch.delenv("AGENT_OS_BASE_URL", raising=False)
+    client = agent_os.AgentOSClient(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    with pytest.raises(agent_os.AgentOSConfigError):
+        await client.invoke_app("demo_app", {})
+
+
+@pytest.mark.asyncio
+async def test_invoke_app_non_object_json_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
+    monkeypatch.setenv("AGENT_OS_BASE_URL", "http://agent-os.test")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=["not", "object"])
+
+    client = agent_os.AgentOSClient(transport=httpx.MockTransport(handler))
+    with pytest.raises(agent_os.AgentOSResponseError):
+        await client.invoke_app("demo_app", {})
