@@ -722,7 +722,9 @@ class ChecklistService:
             )
             input_hash = hashlib.sha256(
                 (
-                    context.stable_prefix
+                    context.system_instructions
+                    + context.interpret_report
+                    + context.admin_config
                     + "".join(context.segments)
                 ).encode("utf-8")
             ).hexdigest()

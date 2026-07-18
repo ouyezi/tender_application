@@ -16,17 +16,36 @@ class ChecklistInputError(RuntimeError):
     pass
 
 
+SYSTEM_INSTRUCTIONS = """你是招标诊断检查项生成助手。
+根据解读报告、管理端配置参考与当前招标正文分片，生成本分片的近终态检查项清单。
+规则：
+1. 只基于本分片招标正文生成可追溯检查项；禁止无招标依据的推断。
+2. 每条检查项只描述一个可独立判断的要点，填写 title/requirement/technique/importance。
+3. importance 只能是 high|medium|low。
+4. compliance_rules 必须包含键：satisfied, violated, cannot_satisfy, insufficient_evidence。
+5. consequence_rules 的键只能来自：no_score, bid_unusable, score_risk, general_risk。
+6. source_references 必须含 coordinate_space=segment、segment_index、start、end、section，且偏移落在本分片内。
+7. 按预计命中的标书内容位置动态分类，输出 categories 与 items。
+8. schema_version 必须为 "1"。
+输出必须是符合 schema 的 JSON 对象。"""
+
+
 @dataclass(frozen=True)
-class PromptCall:
-    stable_prefix: str
+class ChecklistCallInput:
+    system_instructions: str
+    interpret_report: str
+    admin_config: str
     tender_segment: str
+    segment_index: int
 
 
 @dataclass(frozen=True)
 class PromptContext:
-    stable_prefix: str
+    system_instructions: str
+    interpret_report: str
+    admin_config: str
     segments: list[str]
-    calls: list[PromptCall]
+    calls: list[ChecklistCallInput]
 
 
 def estimate_tokens(text: str) -> int:
@@ -129,22 +148,20 @@ def build_prompt_context(
         sort_keys=True,
         separators=(",", ":"),
     )
-    stable_prefix = (
-        "## 固定生成规则和 schema\n"
-        "根据完整输入生成结构化检查项；输出必须符合检查项 schema。\n\n"
-        "## 完整解读报告\n"
-        f"{interpret_markdown}\n\n"
-        "## 管理端配置（JSON，稳定 key 排序）\n"
-        f"{config_json}\n\n"
-        "## 当前招标正文分片\n"
-        "正文分片由每次调用的 tender_segment 单独提供。"
-    )
     calls = [
-        PromptCall(stable_prefix=stable_prefix, tender_segment=segment)
-        for segment in segments
+        ChecklistCallInput(
+            system_instructions=SYSTEM_INSTRUCTIONS,
+            interpret_report=interpret_markdown,
+            admin_config=config_json,
+            tender_segment=segment,
+            segment_index=index,
+        )
+        for index, segment in enumerate(segments)
     ]
     return PromptContext(
-        stable_prefix=stable_prefix,
+        system_instructions=SYSTEM_INSTRUCTIONS,
+        interpret_report=interpret_markdown,
+        admin_config=config_json,
         segments=segments,
         calls=calls,
     )

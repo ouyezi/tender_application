@@ -40,7 +40,7 @@ def test_short_document_returns_original_single_segment():
     assert segments == [markdown]
 
 
-def test_long_document_builds_cache_friendly_calls_in_stable_order():
+def test_long_document_builds_explicit_calls_in_stable_order():
     tender = "# 第一章\n" + "甲" * 80 + "\n# 第二章\n" + "乙" * 80
     interpretation = "# 解读报告\n完整解读"
     configs = [{"title": "后项", "id": 2}, {"id": 1, "title": "前项"}]
@@ -49,16 +49,18 @@ def test_long_document_builds_cache_friendly_calls_in_stable_order():
 
     assert len(context.segments) > 1
     assert [call.tender_segment for call in context.calls] == context.segments
-    assert {call.stable_prefix for call in context.calls} == {context.stable_prefix}
-    prefix = context.stable_prefix
-    rules_at = prefix.index("固定生成规则和 schema")
-    interpretation_at = prefix.index(interpretation)
-    configs_at = prefix.index(
-        json.dumps(configs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    assert context.system_instructions == checklist_context.SYSTEM_INSTRUCTIONS
+    assert context.interpret_report == interpretation
+    expected_config = json.dumps(
+        configs, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
-    segment_heading_at = prefix.index("当前招标正文分片")
-    assert rules_at < interpretation_at < configs_at < segment_heading_at
-    assert tender not in prefix
+    assert context.admin_config == expected_config
+    for index, call in enumerate(context.calls):
+        assert call.system_instructions == context.system_instructions
+        assert call.interpret_report == interpretation
+        assert call.admin_config == expected_config
+        assert call.segment_index == index
+    assert tender not in context.system_instructions
 
 
 def test_multiple_atx_sections_split_at_heading_boundaries_first():
