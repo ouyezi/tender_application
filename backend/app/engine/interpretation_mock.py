@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 from app.engine.base import InterpretationResult
 
@@ -14,21 +13,23 @@ class MockInterpretationAgent:
         self,
         *,
         task_id: str,
-        tender_path: str,
+        tender_text: str,
         background: str,
+        requirements: str,
     ) -> InterpretationResult:
         await asyncio.sleep(self.delay_seconds)
-        filename = Path(tender_path).name
         bg = background.strip() or "（未提供项目背景）"
+        req = requirements.strip() or "（未提供解读要求）"
+        excerpt = tender_text.strip()[:80] or "（空正文）"
         markdown = f"""# 招标文件解读报告
 
 **任务编号：** {task_id}
 
-**招标文件：** {filename}
-
 ## 项目概况
 
-基于上传的招标文件「{filename}」与项目背景「{bg}」整理如下要点（Mock）。
+基于招标正文「{excerpt}」与项目背景「{bg}」整理如下要点（Mock）。
+
+解读要求：{req}
 
 ## 招标范围与资质要求
 

@@ -11,6 +11,7 @@ from app.api.workspaces import router as workspaces_router
 from app.config import REPORT_DIR, UPLOAD_DIR
 from app.db import init_db, recover_interrupted_parse_jobs, recover_interrupted_tasks
 from app.seed import seed_configs_if_empty
+from app.services.tender_content import shutdown_pending_operations
 
 
 @asynccontextmanager
@@ -28,7 +29,10 @@ async def lifespan(app: FastAPI):
 
     await parse_scheduler.kick()
     await index_scheduler.kick()
-    yield
+    try:
+        yield
+    finally:
+        await shutdown_pending_operations()
 
 
 app = FastAPI(title="Tender Diagnosis Demo", lifespan=lifespan)

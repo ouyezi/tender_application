@@ -37,8 +37,9 @@ class InterpretationAgent(Protocol):
         self,
         *,
         task_id: str,
-        tender_path: str,
+        tender_text: str,
         background: str,
+        requirements: str,
     ) -> InterpretationResult: ...
 
 
