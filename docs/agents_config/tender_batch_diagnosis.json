@@ -1,0 +1,176 @@
+{
+  "agent": {
+    "id": "agt_4e6371b8",
+    "code": "agent_049",
+    "zhName": "标书分类批诊断助手",
+    "enName": "tender_batch_diagnosis",
+    "description": "按分类接收检查项与标书检索块，输出每条检查项的合规判定、证据与建议，供标书诊断调度器调用。",
+    "publishedVersion": 1,
+    "publishedAt": "2026-07-20T06:51:14+08:00",
+    "createdAt": "2026-07-20T06:51:14+08:00"
+  },
+  "application": {
+    "id": "app_a66abf25",
+    "name": "标书分类批诊断",
+    "enName": "tender_batch_diagnosis_app",
+    "agentId": "agt_4e6371b8",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 180000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "published",
+    "publishedAt": "2026-07-20T06:51:14+08:00"
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "tender_batch_diagnosis_app",
+    "requiredInputs": [
+      "system_instructions",
+      "category_payload",
+      "retrieved_chunks"
+    ],
+    "optionalInputs": []
+  },
+  "model": {
+    "modelId": "mdl_780e2fbe",
+    "modelName": "qwen3.6-flash",
+    "temperature": 0.3,
+    "thinking": false
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_system_instructions",
+        "name": "system_instructions",
+        "description": "固定判定规则与输出约束",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_category_payload",
+        "name": "category_payload",
+        "description": "当前分类与检查项 JSON 字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_retrieved_chunks",
+        "name": "retrieved_chunks",
+        "description": "检索到的标书内容块 JSON 字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": [
+      {
+        "id": "f_schema_version",
+        "name": "schema_version",
+        "description": "输出 schema 版本，固定为 1",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_results",
+        "name": "results",
+        "description": "本批检查项诊断结果",
+        "type": "array",
+        "required": true,
+        "itemType": "object",
+        "children": [
+          {
+            "id": "f_checklist_item_id",
+            "name": "checklist_item_id",
+            "description": "对应检查项 id",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_compliance",
+            "name": "compliance",
+            "description": "satisfied|violated|cannot_satisfy|insufficient_evidence",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_consequence_tags",
+            "name": "consequence_tags",
+            "description": "后果标签列表",
+            "type": "array",
+            "required": true,
+            "itemType": "string",
+            "children": [
+              {
+                "id": "f_consequence_tag_item",
+                "name": "item",
+                "description": "标签",
+                "type": "string",
+                "required": true,
+                "children": null,
+                "itemType": null
+              }
+            ]
+          },
+          {
+            "id": "f_evidence",
+            "name": "evidence",
+            "description": "证据说明",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_suggestion",
+            "name": "suggestion",
+            "description": "改进建议",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
+            "id": "f_description",
+            "name": "description",
+            "description": "结果摘要",
+            "type": "string",
+            "required": false,
+            "children": null,
+            "itemType": null
+          }
+        ]
+      }
+    ]
+  },
+  "prompt": {
+    "systemPrompt": "你是标书合规批诊断助手。\n\n## 固定判定规则与输出约束\n{{system_instructions}}\n\n## 当前分类与检查项（JSON）\n{{category_payload}}\n\n## 检索到的标书内容块（JSON）\n{{retrieved_chunks}}\n\n## 职责\n1. 仅为 category_payload.items 中每条检查项输出一条 results；输出 checklist_item_id 对应 items[].id。\n2. 依据 retrieved_chunks 判定；证据不足用 insufficient_evidence；禁止臆造未出现的证据。\n3. compliance 只能是 satisfied|violated|cannot_satisfy|insufficient_evidence。\n4. consequence_tags 只能来自 no_score|bid_unusable|score_risk|general_risk；可为空列表。\n5. schema_version 必须为 \"1\"。\n6. 严格输出符合 outputSchema 的 JSON，不要额外说明。\n",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 0,
+    "timeoutMs": 180000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
+  }
+}
