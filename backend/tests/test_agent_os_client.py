@@ -95,9 +95,6 @@ def test_load_settings_parse_wait_timeout(tmp_path, monkeypatch):
 
 
 def test_load_settings_batch_diagnosis_index_wait_timeout(tmp_path, monkeypatch):
-    import json
-    from app.services import agent_os
-
     cfg = tmp_path / "config.local.json"
     cfg.write_text(
         json.dumps(
