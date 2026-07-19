@@ -168,7 +168,7 @@ from app.services.bid_index_wait import (
 
 
 @pytest.mark.asyncio
-async def test_wait_returns_when_bid_index_ready(db_session, monkeypatch):
+async def test_wait_returns_when_bid_index_ready(client, monkeypatch):
     now = datetime.now(timezone.utc)
     async with db.SessionLocal() as session:
         session.add(
@@ -203,7 +203,7 @@ async def test_wait_returns_when_bid_index_ready(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_wait_fails_when_bid_index_failed(db_session, monkeypatch):
+async def test_wait_fails_when_bid_index_failed(client, monkeypatch):
     now = datetime.now(timezone.utc)
     async with db.SessionLocal() as session:
         session.add(
@@ -303,7 +303,7 @@ async def test_wait_times_out_when_still_queued(db_session, monkeypatch):
         await wait_for_bid_index_ready("t-idx-timeout", timeout=0.05)
 ```
 
-若项目 `db_session` fixture 名称不同，复用 `conftest.py` / `test_index_scheduler.py` 中已有 session fixture，保持与现有测试一致。
+这些用例依赖 `client` fixture（见 `conftest.py`）：它会 patch `app.db.SessionLocal` 并建表。测试函数签名加 `client`，即使体内不用 `client` 变量也要保留该参数。
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -701,20 +701,31 @@ monkeypatch.setattr(scheduler, "AgentOSBatchDiagnosisEngine", E)
 
 - [ ] **Step 2: Add failing tests for index gate**
 
-在 `test_scheduler.py` 追加（可按现有 fixture 风格精简）：
+在 `test_scheduler.py` 追加（风格对齐 `test_run_diagnosis_phase_mixed_modes`，依赖 `client` fixture 以初始化 DB）：
 
 ```python
 @pytest.mark.asyncio
-async def test_diagnosis_waits_for_bid_index_when_file_items(monkeypatch):
+async def test_diagnosis_fails_when_bid_index_wait_blocked(monkeypatch, client):
+    from datetime import datetime, timezone
+
+    from app.models import DiagnosisTask
     from app.services import scheduler
     from app.services.bid_index_wait import BidIndexBlockedError
 
-    async def boom(*a, **k):
+    async def boom(task_id, timeout=None):
+        del task_id, timeout
         raise BidIndexBlockedError("bid_index_timeout")
 
-    monkeypatch.setattr(scheduler, "wait_for_bid_index_ready", boom)
+    wait_calls = {"n": 0}
+
+    async def tracked_wait(task_id, timeout=None):
+        wait_calls["n"] += 1
+        return await boom(task_id, timeout)
+
+    monkeypatch.setattr(scheduler, "wait_for_bid_index_ready", tracked_wait)
 
     async def fake_report(task_id):
+        del task_id
         return {
             "categories": [
                 {
@@ -734,13 +745,108 @@ async def test_diagnosis_waits_for_bid_index_when_file_items(monkeypatch):
         }
 
     monkeypatch.setattr(scheduler, "get_report", fake_report)
-    # seed DiagnosisTask status=diagnosing id=task-idx-gate ...
-    # call _run_diagnosis_phase → expect False / task failed with diagnosing
+
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session:
+        session.add(
+            DiagnosisTask(
+                id="task-idx-gate",
+                tender_filename="t.pdf",
+                tender_path="t.pdf",
+                bid_filename="b.docx",
+                bid_path="b.docx",
+                status="diagnosing",
+                progress_done=0,
+                progress_total=1,
+                background="",
+                requirements="",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    assert await scheduler._run_diagnosis_phase("task-idx-gate") is False
+    assert wait_calls["n"] == 1
+    async with db.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, "task-idx-gate")
+        assert task is not None
+        assert task.status == "failed"
+        assert task.failure_stage == "diagnosing"
+        assert "bid_index_timeout" in (task.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_diagnosis_skips_index_wait_when_all_offline(monkeypatch, client):
+    from datetime import datetime, timezone
+
+    from app.models import DiagnosisTask
+    from app.services import scheduler
+
+    wait_calls = {"n": 0}
+
+    async def tracked_wait(task_id, timeout=None):
+        del task_id, timeout
+        wait_calls["n"] += 1
+
+    monkeypatch.setattr(scheduler, "wait_for_bid_index_ready", tracked_wait)
+
+    class E:
+        def __init__(self, *a, **k):
+            pass
+
+        async def diagnose_category(self, **kwargs):
+            raise AssertionError("engine should not run for all-offline")
+
+    monkeypatch.setattr(scheduler, "AgentOSBatchDiagnosisEngine", E)
+
+    async def fake_report(task_id):
+        del task_id
+        return {
+            "categories": [
+                {
+                    "id": "c1",
+                    "name": "c",
+                    "items": [
+                        {
+                            "id": "offline-1",
+                            "title": "密封",
+                            "requirement": "密封",
+                            "diagnosis_mode": "offline",
+                            "consequence_rules": {},
+                        }
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(scheduler, "get_report", fake_report)
+
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session:
+        session.add(
+            DiagnosisTask(
+                id="task-all-offline",
+                tender_filename="t.pdf",
+                tender_path="t.pdf",
+                bid_filename="b.docx",
+                bid_path="b.docx",
+                status="diagnosing",
+                progress_done=0,
+                progress_total=1,
+                background="",
+                requirements="",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    assert await scheduler._run_diagnosis_phase("task-all-offline") is True
+    assert wait_calls["n"] == 0
 ```
 
-再追加：全部 `offline` 时 **不调用** `wait_for_bid_index_ready`（用 call counter mock）。
-
-实现测试时复用 `test_offline_mixed_category_skips_retrieval_for_offline` 的任务建库模式；失败路径断言 `DiagnosisTask.status == "failed"` 且 `failure_stage == "diagnosing"`。
+确保文件顶部已 `from app import db`（与同文件其它用例一致）。
 
 - [ ] **Step 3: Wire scheduler**
 
@@ -1003,12 +1109,18 @@ def main() -> int:
             return 1
 
         results = detail.get("results") or []
-        file_items = [i for i in items if (i.get("diagnosis_mode") or "file") != "offline"]
+        if len(results) < 1:
+            print("results empty", file=sys.stderr)
+            return 1
+        file_items = [
+            i for i in items if (i.get("diagnosis_mode") or "file") != "offline"
+        ]
         if file_items:
-            blob = str(results)
-            if "mock evidence for checklist item" in blob.lower():
-                print("mock evidence detected in results", file=sys.stderr)
-                return 1
+            for row in results:
+                evidence = str(row.get("evidence") or "")
+                if "mock evidence for checklist item" in evidence.lower():
+                    print("mock evidence detected in results", file=sys.stderr)
+                    return 1
 
         report = client.get(f"/api/tasks/{task_id}/report.docx")
         if report.status_code != 200:
