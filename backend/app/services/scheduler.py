@@ -45,6 +45,43 @@ STOPPABLE_STATUSES = frozenset(
     {"interpreting", "generating_checklist", "diagnosing", "running", "paused"}
 )
 
+OFFLINE_EVIDENCE = "未检索文件（线下核验项）"
+OFFLINE_SUGGESTION = (
+    "该项属于打印/装订/密封等线下要求，需人工核验纸质或现场材料，系统不进行文件诊断"
+)
+
+
+def _split_items_by_diagnosis_mode(
+    items: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    offline: list[dict] = []
+    file_items: list[dict] = []
+    for item in items:
+        mode = item.get("diagnosis_mode") or "file"
+        if mode == "offline":
+            offline.append(item)
+        else:
+            file_items.append(item)
+    return offline, file_items
+
+
+def _offline_batch_result(item: dict):
+    from app.engine.base import BatchItemResult
+
+    tags: list[str] = []
+    rules = item.get("consequence_rules") or {}
+    if isinstance(rules, dict):
+        tags = [k for k in rules if isinstance(k, str)]
+    description = str(item.get("requirement") or item.get("title") or "")
+    return BatchItemResult(
+        checklist_item_id=item["id"],
+        compliance="manual_required",
+        consequence_tags=tags,
+        evidence=OFFLINE_EVIDENCE,
+        suggestion=OFFLINE_SUGGESTION,
+        description=description,
+    )
+
 
 def _build_tender_content_provider() -> TenderContentProvider:
     settings = load_settings()
@@ -446,18 +483,30 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
             await _mark_stopped(task_id)
             return False
 
-        retrieved_chunks = await retrieval.retrieve_for_category(
-            task_id=task_id,
-            category=category,
-            items=category_items,
-        )
-        batch_results = await engine.diagnose_category(
-            task_id=task_id,
-            category=category,
-            items=category_items,
-            retrieved_chunks=retrieved_chunks,
-        )
-        assert_batch_complete(category_items, batch_results)
+        offline_items, file_items = _split_items_by_diagnosis_mode(category_items)
+        result_by_id: dict = {}
+        for item in offline_items:
+            result_by_id[item["id"]] = _offline_batch_result(item)
+
+        if file_items:
+            retrieved_chunks = await retrieval.retrieve_for_category(
+                task_id=task_id,
+                category=category,
+                items=file_items,
+            )
+            batch_results = await engine.diagnose_category(
+                task_id=task_id,
+                category=category,
+                items=file_items,
+                retrieved_chunks=retrieved_chunks,
+            )
+            assert_batch_complete(file_items, batch_results)
+            for batch_result in batch_results:
+                result_by_id[batch_result.checklist_item_id] = batch_result
+
+        ordered_pairs = [
+            (item, result_by_id[item["id"]]) for item in category_items
+        ]
 
         async with database.SessionLocal() as session:
             task = await session.get(DiagnosisTask, task_id)
@@ -466,7 +515,7 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
             if task.status in TERMINAL_STATUSES:
                 return False
 
-            for item, batch_result in zip(category_items, batch_results):
+            for item, batch_result in ordered_pairs:
                 session.add(
                     DiagnosisResult(
                         task_id=task_id,

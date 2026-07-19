@@ -506,3 +506,137 @@ async def test_parse_failed_via_workspace_file(client, monkeypatch):
     assert status == "failed"
     detail = (await client.get(f"/api/tasks/{task_id}")).json()
     assert detail["failure_stage"] == "tender_parse"
+
+
+def test_split_and_offline_result():
+    from app.services.scheduler import (
+        _split_items_by_diagnosis_mode,
+        _offline_batch_result,
+    )
+
+    offline, file_items = _split_items_by_diagnosis_mode(
+        [
+            {
+                "id": "a",
+                "diagnosis_mode": "offline",
+                "title": "装订",
+                "requirement": "胶装",
+            },
+            {"id": "b", "diagnosis_mode": "file", "title": "执照"},
+            {"id": "c", "title": "缺省"},
+        ]
+    )
+    assert [i["id"] for i in offline] == ["a"]
+    assert [i["id"] for i in file_items] == ["b", "c"]
+    result = _offline_batch_result(offline[0])
+    assert result.compliance == "manual_required"
+    assert result.evidence == "未检索文件（线下核验项）"
+    assert result.suggestion == (
+        "该项属于打印/装订/密封等线下要求，需人工核验纸质或现场材料，系统不进行文件诊断"
+    )
+    assert result.description == "胶装"
+
+
+@pytest.mark.asyncio
+async def test_run_diagnosis_phase_mixed_modes(monkeypatch, client):
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.engine.base import BatchItemResult
+    from app.models import DiagnosisResult
+
+    calls = {"retrieve": 0, "diagnose": 0}
+
+    class R:
+        async def retrieve_for_category(self, **kwargs):
+            calls["retrieve"] += 1
+            assert [i["id"] for i in kwargs["items"]] == ["file-1"]
+            return []
+
+    class E:
+        def __init__(self, *a, **k):
+            pass
+
+        async def diagnose_category(self, **kwargs):
+            calls["diagnose"] += 1
+            item = kwargs["items"][0]
+            return [
+                BatchItemResult(
+                    checklist_item_id=item["id"],
+                    compliance="satisfied",
+                    consequence_tags=[],
+                    evidence="e",
+                    suggestion="s",
+                    description="d",
+                )
+            ]
+
+    monkeypatch.setattr(scheduler, "build_retrieval_provider", lambda: R())
+    monkeypatch.setattr(scheduler, "MockBatchDiagnosisEngine", E)
+
+    async def fake_report(task_id):
+        del task_id
+        return {
+            "categories": [
+                {
+                    "id": "c1",
+                    "name": "c",
+                    "items": [
+                        {
+                            "id": "offline-1",
+                            "title": "密封",
+                            "requirement": "密封",
+                            "diagnosis_mode": "offline",
+                            "consequence_rules": {},
+                        },
+                        {
+                            "id": "file-1",
+                            "title": "执照",
+                            "requirement": "执照",
+                            "diagnosis_mode": "file",
+                            "consequence_rules": {},
+                        },
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(scheduler, "get_report", fake_report)
+
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session:
+        session.add(
+            DiagnosisTask(
+                id="task-offline-mix",
+                tender_filename="t.pdf",
+                tender_path="t.pdf",
+                bid_filename="b.docx",
+                bid_path="b.docx",
+                status="diagnosing",
+                progress_done=0,
+                progress_total=2,
+                background="",
+                requirements="",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    assert await scheduler._run_diagnosis_phase("task-offline-mix") is True
+    assert calls["retrieve"] == 1
+    assert calls["diagnose"] == 1
+
+    async with db.SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(DiagnosisResult).where(
+                    DiagnosisResult.task_id == "task-offline-mix"
+                )
+            )
+        ).scalars().all()
+    statuses = {r.checklist_item_id: r.compliance_status for r in rows}
+    assert statuses["offline-1"] == "manual_required"
+    assert statuses["file-1"] == "satisfied"
+    assert [r.checklist_item_id for r in rows] == ["offline-1", "file-1"]

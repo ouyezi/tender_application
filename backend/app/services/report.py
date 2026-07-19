@@ -19,6 +19,7 @@ COMPLIANCE_LABELS = {
     "violated": "违反",
     "cannot_satisfy": "无法满足",
     "insufficient_evidence": "证据不足",
+    "manual_required": "需线下核验",
 }
 
 CONSEQUENCE_LABELS = {

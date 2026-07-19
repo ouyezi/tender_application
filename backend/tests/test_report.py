@@ -31,6 +31,22 @@ def test_build_markdown_contains_titles():
     assert "得分风险" in md
 
 
+def test_build_markdown_manual_required_label():
+    results = [
+        {
+            "content_title": "密封",
+            "description": "密封要求",
+            "result": "manual_required",
+            "compliance_status": "manual_required",
+            "consequence_tags": [],
+            "evidence": "未检索文件（线下核验项）",
+            "suggestion": "需人工核验",
+        },
+    ]
+    md = build_markdown("T-2", results)
+    assert "需线下核验" in md
+
+
 def test_write_docx_creates_non_empty_file(tmp_path):
     path = tmp_path / "r.docx"
     write_docx(str(path), "# 标书诊断报告\n\n你好")
