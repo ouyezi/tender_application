@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app import config
 from app import db as database
 from app.models import DiagnosisTask, IndexJob
+from app.services.agent_os import load_settings
 
 
 class BidIndexBlockedError(RuntimeError):
@@ -20,15 +21,9 @@ async def wait_for_bid_index_ready(
     if timeout is not None:
         wait_timeout = float(timeout)
     else:
-        wait_timeout = float(config.BATCH_DIAGNOSIS_INDEX_WAIT_TIMEOUT_SECONDS)
-        try:
-            from app.services.agent_os import load_settings
-
-            wait_timeout = float(
-                load_settings().batch_diagnosis_index_wait_timeout_seconds
-            )
-        except Exception:
-            pass
+        wait_timeout = float(
+            load_settings().batch_diagnosis_index_wait_timeout_seconds
+        )
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + wait_timeout
