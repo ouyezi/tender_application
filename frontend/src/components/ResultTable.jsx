@@ -3,6 +3,7 @@ const COMPLIANCE_LABELS = {
   violated: '违反',
   cannot_satisfy: '不能满足',
   insufficient_evidence: '证据不足',
+  manual_required: '需线下核验',
   通过: '通过',
   风险: '风险',
   缺失: '缺失',

@@ -221,7 +221,12 @@ export default function ChecklistReport({
                             {expanded ? '▾' : '▸'}
                           </button>
                         </td>
-                        <td>{item.title || '—'}</td>
+                        <td>
+                          {item.title || '—'}
+                          {item.diagnosis_mode === 'offline' && (
+                            <span className="checklist-offline-tag">线下核验</span>
+                          )}
+                        </td>
                         <td>{item.requirement || '—'}</td>
                         <td>{item.technique || '—'}</td>
                         <td>{IMPORTANCE_LABELS[item.importance] || item.importance || '—'}</td>

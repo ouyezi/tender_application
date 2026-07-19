@@ -1041,6 +1041,20 @@ a:hover {
   white-space: nowrap;
 }
 
+.checklist-offline-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 .checklist-expand-head {
   width: 3rem;
   text-align: center;
