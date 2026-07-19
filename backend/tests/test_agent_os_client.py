@@ -94,6 +94,30 @@ def test_load_settings_parse_wait_timeout(tmp_path, monkeypatch):
     assert settings.parse_wait_timeout_seconds == 100.0
 
 
+def test_load_settings_batch_diagnosis_index_wait_timeout(tmp_path, monkeypatch):
+    import json
+    from app.services import agent_os
+
+    cfg = tmp_path / "config.local.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "agentOs": {"baseUrl": "http://localhost:8000"},
+                "batchDiagnosis": {"indexWaitTimeoutSeconds": 3600},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", cfg)
+    monkeypatch.delenv("BATCH_DIAGNOSIS_INDEX_WAIT_TIMEOUT_SECONDS", raising=False)
+    settings = agent_os.load_settings()
+    assert settings.batch_diagnosis_index_wait_timeout_seconds == 3600.0
+
+    monkeypatch.setenv("BATCH_DIAGNOSIS_INDEX_WAIT_TIMEOUT_SECONDS", "120")
+    settings = agent_os.load_settings()
+    assert settings.batch_diagnosis_index_wait_timeout_seconds == 120.0
+
+
 def test_load_settings_missing_base_url_is_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
     for key in ("AGENT_OS_BASE_URL",):

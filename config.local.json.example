@@ -11,5 +11,8 @@
   },
   "tenderInterpretation": {
     "parseWaitTimeoutSeconds": 1800
+  },
+  "batchDiagnosis": {
+    "indexWaitTimeoutSeconds": 7200
   }
 }

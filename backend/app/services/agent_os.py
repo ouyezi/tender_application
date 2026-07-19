@@ -26,6 +26,7 @@ class AgentOSSettings:
     auth_header_name: str = ""
     auth_header_value: str = ""
     parse_wait_timeout_seconds: float = 1800.0
+    batch_diagnosis_index_wait_timeout_seconds: float = 7200.0
 
 
 class AgentOSError(Exception):
@@ -94,6 +95,11 @@ def load_settings(path: Optional[Path] = None) -> AgentOSSettings:
         if isinstance(local.get("tenderInterpretation"), dict)
         else {}
     )
+    batch_diagnosis = (
+        local.get("batchDiagnosis")
+        if isinstance(local.get("batchDiagnosis"), dict)
+        else {}
+    )
     return AgentOSSettings(
         base_url=str(_env_or(agent_os.get("baseUrl"), "AGENT_OS_BASE_URL", "")).rstrip(
             "/"
@@ -120,6 +126,14 @@ def load_settings(path: Optional[Path] = None) -> AgentOSSettings:
                 1800,
             ),
             1800.0,
+        ),
+        batch_diagnosis_index_wait_timeout_seconds=_as_float(
+            _env_or(
+                batch_diagnosis.get("indexWaitTimeoutSeconds"),
+                "BATCH_DIAGNOSIS_INDEX_WAIT_TIMEOUT_SECONDS",
+                7200,
+            ),
+            7200.0,
         ),
     )
 
