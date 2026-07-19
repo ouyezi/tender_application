@@ -5,8 +5,8 @@
     "zhName": "标书分类批诊断助手",
     "enName": "tender_batch_diagnosis",
     "description": "按分类接收检查项与标书检索块，输出每条检查项的合规判定、证据与建议，供标书诊断调度器调用。",
-    "publishedVersion": 2,
-    "publishedAt": "2026-07-20T06:51:38+08:00",
+    "publishedVersion": 3,
+    "publishedAt": "2026-07-20T06:52:41+08:00",
     "createdAt": "2026-07-20T06:51:14+08:00"
   },
   "application": {
