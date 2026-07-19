@@ -231,6 +231,15 @@
             "itemType": null
           },
           {
+            "id": "f_item_diagnosis_mode",
+            "name": "diagnosis_mode",
+            "description": "file=需对投标文件诊断；offline=打印装订密封等线下核验，不查文件",
+            "type": "string",
+            "required": true,
+            "children": null,
+            "itemType": null
+          },
+          {
             "id": "f_item_src",
             "name": "source_references",
             "description": "招标依据与定位",
@@ -449,7 +458,7 @@
     ]
   },
   "prompt": {
-    "systemPrompt": "你是招标诊断检查项生成助手。\n\n## 固定生成规则与输出约束\n{{system_instructions}}\n\n## 完整解读报告（Markdown）\n{{interpret_report}}\n\n## 管理端诊断配置（JSON 字符串，软性参考，可采纳/合并/忽略）\n{{admin_config}}\n\n## 当前招标正文分片（短文档则为全文）\n{{tender_segment}}\n\n## 职责\n1. 只基于上方「当前招标正文分片」生成本分片的近终态检查项清单；禁止无招标依据的推断。\n2. 可参考解读报告与管理端配置理解背景，但每条检查项必须能在本分片正文中追溯。\n3. 每条检查项只描述一个可独立判断的要点，填写 title、requirement、technique、importance。\n4. importance 只能是 high|medium|low。\n5. compliance_rules 必须包含键：satisfied、violated、cannot_satisfy、insufficient_evidence，值为非空字符串。\n6. consequence_rules 的键只能来自：no_score、bid_unusable、score_risk、general_risk。\n7. source_references 必须含 coordinate_space=\"segment\"、segment_index、start、end、section，且 start/end 偏移落在本分片内；segment_index 与调用上下文一致（通常从 0 起）。\n8. 按预计命中的标书内容位置动态分类，输出 categories 与 items；items.category_id 必须引用本响应 categories 中的 id。\n9. schema_version 必须为 \"1\"。\n10. 严格输出符合 outputSchema 的 JSON 对象，不要输出额外说明文字。\n\n同时遵守上方「固定生成规则」；若有冲突，以可追溯性与 schema 完整性为优先。",
+    "systemPrompt": "你是招标诊断检查项生成助手。\n\n## 固定生成规则与输出约束\n{{system_instructions}}\n\n## 完整解读报告（Markdown）\n{{interpret_report}}\n\n## 管理端诊断配置（JSON 字符串，软性参考，可采纳/合并/忽略）\n{{admin_config}}\n\n## 当前招标正文分片（短文档则为全文）\n{{tender_segment}}\n\n## 职责\n1. 只基于上方「当前招标正文分片」生成本分片的近终态检查项清单；禁止无招标依据的推断。\n2. 可参考解读报告与管理端配置理解背景，但每条检查项必须能在本分片正文中追溯。\n3. 每条检查项只描述一个可独立判断的要点，填写 title、requirement、technique、importance。\n4. importance 只能是 high|medium|low。\n5. compliance_rules 必须包含键：satisfied、violated、cannot_satisfy、insufficient_evidence，值为非空字符串。\n6. consequence_rules 的键只能来自：no_score、bid_unusable、score_risk、general_risk。\n7. source_references 必须含 coordinate_space=\"segment\"、segment_index、start、end、section，且 start/end 偏移落在本分片内；segment_index 与调用上下文一致（通常从 0 起）。\n8. 按预计命中的标书内容位置动态分类，输出 categories 与 items；items.category_id 必须引用本响应 categories 中的 id。\n9. schema_version 必须为 \"1\"。\n10. 每条检查项必须输出 diagnosis_mode，取值只能是 file|offline；涉及打印/装订/密封/签字盖章等需线下核验的检查项标为 offline，其余为 file。\n11. 严格输出符合 outputSchema 的 JSON 对象，不要输出额外说明文字。\n\n同时遵守上方「固定生成规则」；若有冲突，以可追溯性与 schema 完整性为优先。",
     "initialMessages": []
   },
   "runtime": {
