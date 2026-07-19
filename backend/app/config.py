@@ -10,9 +10,11 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".pdf", ".docx"}
 MOCK_ITEM_DELAY_SECONDS = 0.8
+# Kept for MockInterpretationAgent unit tests only; production uses Agent OS.
 MOCK_INTERPRET_DELAY_SECONDS = 0.5
 MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS = 0.5
-INTERPRETATION_AGENT = "mock"  # mock | http (http not implemented this sprint)
+# Legacy flags — scheduler always uses AgentOSInterpretationAgent now.
+INTERPRETATION_AGENT = "mock"
 INTERPRETATION_AGENT_URL = ""
 CHECKLIST_AGENT = "agent_os"
 CHECKLIST_AGENT_VERSION = "1"

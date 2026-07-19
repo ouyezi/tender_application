@@ -6,17 +6,15 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from app import db as database
-from app.config import (
-    MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS,
-    MOCK_INTERPRET_DELAY_SECONDS,
-)
+from app.config import MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS
 from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
 from app.engine.checklist_agent_os import AgentOSChecklistAgent
-from app.engine.interpretation_mock import MockInterpretationAgent
+from app.engine.interpretation_agent_os import AgentOSInterpretationAgent
 from app.engine.retrieval_mock import MockRetrievalProvider
 from app.engine.retrieval_workspace import WorkspaceRetrievalProvider
 from app.models import DiagnosisResult, DiagnosisTask, WorkspaceFile, utcnow
 from app.services import interpret_report, report
+from app.services.agent_os import AgentOSClient, load_settings
 from app.services.checklist_service import (
     ChecklistService,
     ChecklistValidationError,
@@ -27,6 +25,7 @@ from app.services.checklist_service import (
     wait_for_tender_parse_ready,
 )
 from app.services.checklist_context import ChecklistInputError
+from app.services.tender_content import TenderContentProvider, TenderContentStopped
 
 
 class SchedulerConflict(Exception):
@@ -45,6 +44,15 @@ TERMINAL_STATUSES = frozenset({"completed", "stopped", "failed"})
 STOPPABLE_STATUSES = frozenset(
     {"interpreting", "generating_checklist", "diagnosing", "running", "paused"}
 )
+
+
+def _build_tender_content_provider() -> TenderContentProvider:
+    settings = load_settings()
+    return TenderContentProvider(timeout_seconds=settings.parse_wait_timeout_seconds)
+
+
+def _build_interpretation_agent() -> AgentOSInterpretationAgent:
+    return AgentOSInterpretationAgent(AgentOSClient())
 
 
 @dataclass
@@ -547,6 +555,7 @@ async def _run(task_id: str) -> None:
                 task.updated_at = utcnow()
                 await session.commit()
 
+            tender_file_id = task.tender_file_id
             background = task.background or ""
             requirements = task.requirements or ""
             need_checklist = task.current_checklist_generation_id is None
@@ -556,13 +565,41 @@ async def _run(task_id: str) -> None:
                 await _mark_stopped(task_id)
                 return
 
-            agent = MockInterpretationAgent(delay_seconds=MOCK_INTERPRET_DELAY_SECONDS)
-            interpret_result = await agent.interpret(
-                task_id=task_id,
-                tender_text="",
-                background=background,
-                requirements=requirements,
-            )
+            if not tender_file_id:
+                await _mark_failed(
+                    task_id,
+                    "tender_file_id is required for interpretation",
+                    "interpreting",
+                )
+                return
+
+            try:
+                provider = _build_tender_content_provider()
+                try:
+                    tender_text = await provider.wait_for_markdown(
+                        task_id,
+                        tender_file_id,
+                        stop_requested=lambda: _should_stop(task_id),
+                    )
+                except TenderContentStopped:
+                    await _mark_stopped(task_id)
+                    return
+
+                if _should_stop(task_id):
+                    await _mark_stopped(task_id)
+                    return
+
+                agent = _build_interpretation_agent()
+                interpret_result = await agent.interpret(
+                    task_id=task_id,
+                    tender_text=tender_text,
+                    background=background,
+                    requirements=requirements,
+                )
+            except Exception as exc:
+                await _mark_failed(task_id, str(exc)[:240], "interpreting")
+                return
+
             if _should_stop(task_id):
                 await _mark_stopped(task_id)
                 return

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import io
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
 
 from app import db
 from app.models import DiagnosisTask, WorkspaceFile
+from app.engine.base import InterpretationResult
 from app.engine.checklist_agent_os import AgentOSChecklistAgent
 from tests.fake_checklist_invoke import make_fake_checklist_invoke
 from app.services import scheduler
@@ -80,6 +82,9 @@ async def test_scheduler_runs_to_completion(client):
     assert all(result["compliance_status"] for result in detail["results"])
     assert detail["interpret_md_path"]
     assert detail["interpret_html_path"]
+    interpret_md = Path(detail["interpret_md_path"]).read_text(encoding="utf-8")
+    assert "stub interpret" in interpret_md
+    assert "（Mock）" not in interpret_md
 
 
 @pytest.mark.asyncio
@@ -240,24 +245,26 @@ async def test_pause_on_completed_conflict(client):
 
 
 @pytest.mark.asyncio
-async def test_interpret_failure_marks_failed_without_diagnosis(client, monkeypatch):
-    async def boom(*_args, **kwargs):
-        raise RuntimeError("interpret boom")
+async def test_interpretation_failure_fails_task(client, monkeypatch):
+    class Boom:
+        async def interpret(self, **kwargs):
+            raise RuntimeError("interpret boom")
 
     monkeypatch.setattr(
-        "app.services.scheduler.MockInterpretationAgent.interpret",
-        boom,
+        scheduler,
+        "_build_interpretation_agent",
+        lambda: Boom(),
     )
-    await _seed_configs(client, 2)
+    await _seed_configs(client, 1)
     body = await _create_task(client)
-    task_id = body["id"]
-    status = await scheduler.wait_for_terminal(task_id, timeout=5)
+    status = await scheduler.wait_for_terminal(body["id"], timeout=10)
     assert status == "failed"
-    detail = (await client.get(f"/api/tasks/{task_id}")).json()
+    detail = (await client.get(f"/api/tasks/{body['id']}")).json()
     assert detail["results"] == []
+    assert detail.get("failure_stage") == "interpreting"
     assert "interpret boom" in (detail.get("error_message") or "")
     assert detail.get("interpret_markdown", "") == ""
-    r = await client.get(f"/api/tasks/{task_id}/report.docx")
+    r = await client.get(f"/api/tasks/{body['id']}/report.docx")
     assert r.status_code == 404
 
 
@@ -265,15 +272,15 @@ async def test_interpret_failure_marks_failed_without_diagnosis(client, monkeypa
 async def test_cannot_pause_while_interpreting(client, monkeypatch):
     gate = asyncio.Event()
 
-    async def slow_interpret(*_args, **kwargs):
-        await gate.wait()
-        from app.engine.base import InterpretationResult
-
-        return InterpretationResult(markdown="# x\n")
+    class SlowAgent:
+        async def interpret(self, **kwargs):
+            await gate.wait()
+            return InterpretationResult(markdown="# x\n")
 
     monkeypatch.setattr(
-        "app.services.scheduler.MockInterpretationAgent.interpret",
-        slow_interpret,
+        scheduler,
+        "_build_interpretation_agent",
+        lambda: SlowAgent(),
     )
     await _seed_configs(client, 1)
     body = await _create_task(client)
@@ -299,15 +306,15 @@ async def test_cannot_pause_while_interpreting(client, monkeypatch):
 async def test_stop_during_interpreting(client, monkeypatch):
     gate = asyncio.Event()
 
-    async def slow_interpret(*_args, **kwargs):
-        await gate.wait()
-        from app.engine.base import InterpretationResult
-
-        return InterpretationResult(markdown="# x\n")
+    class SlowAgent:
+        async def interpret(self, **kwargs):
+            await gate.wait()
+            return InterpretationResult(markdown="# x\n")
 
     monkeypatch.setattr(
-        "app.services.scheduler.MockInterpretationAgent.interpret",
-        slow_interpret,
+        scheduler,
+        "_build_interpretation_agent",
+        lambda: SlowAgent(),
     )
     await _seed_configs(client, 1)
     body = await _create_task(client)
@@ -431,11 +438,10 @@ async def test_parse_failed_via_workspace_file(client, monkeypatch):
 
     gate = asyncio.Event()
 
-    async def slow_interpret(*_args, **kwargs):
-        await gate.wait()
-        from app.engine.base import InterpretationResult
-
-        return InterpretationResult(markdown="# x\n")
+    class SlowAgent:
+        async def interpret(self, **kwargs):
+            await gate.wait()
+            return InterpretationResult(markdown="# x\n")
 
     async def blocked_wait(task_id, timeout=300.0):
         del timeout
@@ -447,8 +453,9 @@ async def test_parse_failed_via_workspace_file(client, monkeypatch):
         raise TenderParseBlockedError("tender_parse_failed")
 
     monkeypatch.setattr(
-        "app.services.scheduler.MockInterpretationAgent.interpret",
-        slow_interpret,
+        scheduler,
+        "_build_interpretation_agent",
+        lambda: SlowAgent(),
     )
     monkeypatch.setattr(
         "app.services.scheduler.wait_for_tender_parse_ready",

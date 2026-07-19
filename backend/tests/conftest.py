@@ -63,8 +63,6 @@ async def client(tmp_path, monkeypatch):
     app.mount("/artifact-files", StaticFiles(directory=str(upload_dir)), name="artifact-files")
     monkeypatch.setattr("app.services.report.REPORT_DIR", report_dir)
     monkeypatch.setattr("app.services.interpret_report.REPORT_DIR", report_dir)
-    monkeypatch.setattr("app.config.MOCK_INTERPRET_DELAY_SECONDS", 0.01)
-    monkeypatch.setattr("app.services.scheduler.MOCK_INTERPRET_DELAY_SECONDS", 0.01)
     monkeypatch.setattr("app.config.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
     monkeypatch.setattr("app.services.scheduler.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
     monkeypatch.setattr("app.config.CHECKLIST_PARSE_POLL_SECONDS", 0.01)
@@ -73,6 +71,34 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.services.scheduler.AgentOSChecklistAgent",
         _SchedulerChecklistAgent,
+    )
+
+    from app.engine.base import InterpretationResult
+
+    class _StubContentProvider:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def wait_for_markdown(self, task_id, file_id, *, stop_requested):
+            del task_id, file_id, stop_requested
+            return "# stub tender\n资格要求：须提交营业执照。\n"
+
+    class _StubInterpretationAgent:
+        async def interpret(self, *, task_id, tender_text, background, requirements):
+            del tender_text, background, requirements
+            return InterpretationResult(
+                markdown=(
+                    f"# 招标文件解读报告\n\n**任务编号：** {task_id}\n\nstub interpret\n"
+                )
+            )
+
+    monkeypatch.setattr(
+        "app.services.scheduler._build_tender_content_provider",
+        lambda: _StubContentProvider(),
+    )
+    monkeypatch.setattr(
+        "app.services.scheduler._build_interpretation_agent",
+        lambda: _StubInterpretationAgent(),
     )
 
     async def _fake_parse_pipeline(file_id: str, task_id: str, stored_path: str):
