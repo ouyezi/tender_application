@@ -64,7 +64,6 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.report.REPORT_DIR", report_dir)
     monkeypatch.setattr("app.services.interpret_report.REPORT_DIR", report_dir)
     monkeypatch.setattr("app.config.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
-    monkeypatch.setattr("app.services.scheduler.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
     monkeypatch.setattr("app.config.CHECKLIST_PARSE_POLL_SECONDS", 0.01)
     monkeypatch.setattr("app.config.RETRIEVAL_PROVIDER", "mock")
     apply_retrieval_ai_stubs(monkeypatch)

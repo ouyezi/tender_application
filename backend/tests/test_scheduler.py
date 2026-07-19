@@ -7,12 +7,29 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
-from app import db
+from app import config, db
 from app.models import DiagnosisTask, WorkspaceFile
 from app.engine.base import InterpretationResult
+from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
 from app.engine.checklist_agent_os import AgentOSChecklistAgent
 from tests.fake_checklist_invoke import make_fake_checklist_invoke
 from app.services import scheduler
+
+
+@pytest.fixture(autouse=True)
+def _stub_batch_diagnosis_for_scheduler_tests(monkeypatch):
+    """Keep scheduler integration tests offline: mock engine + skip index gate."""
+
+    class _StubEngine(MockBatchDiagnosisEngine):
+        def __init__(self, *a, **k):
+            del a, k
+            super().__init__(delay_seconds=config.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS)
+
+    async def _noop_wait(task_id, timeout=None):
+        del task_id, timeout
+
+    monkeypatch.setattr(scheduler, "AgentOSBatchDiagnosisEngine", _StubEngine)
+    monkeypatch.setattr(scheduler, "wait_for_bid_index_ready", _noop_wait)
 
 
 def _pdf_bytes():
@@ -159,7 +176,7 @@ async def test_stop_then_resume_conflict(client):
 
 @pytest.mark.asyncio
 async def test_resume_preserves_progress_no_duplicates(client, monkeypatch):
-    monkeypatch.setattr("app.services.scheduler.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.3)
+    monkeypatch.setattr("app.config.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.3)
     await _seed_configs(client, 3)
     body = await _create_task(client)
     task_id = body["id"]
@@ -202,7 +219,7 @@ async def test_resume_preserves_progress_no_duplicates(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stop_preserves_partial_results(client, monkeypatch):
-    monkeypatch.setattr("app.services.scheduler.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.3)
+    monkeypatch.setattr("app.config.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.3)
     await _seed_configs(client, 3)
     body = await _create_task(client)
     task_id = body["id"]
@@ -573,7 +590,7 @@ async def test_run_diagnosis_phase_mixed_modes(monkeypatch, client):
             ]
 
     monkeypatch.setattr(scheduler, "build_retrieval_provider", lambda: R())
-    monkeypatch.setattr(scheduler, "MockBatchDiagnosisEngine", E)
+    monkeypatch.setattr(scheduler, "AgentOSBatchDiagnosisEngine", E)
 
     async def fake_report(task_id):
         del task_id
@@ -640,3 +657,145 @@ async def test_run_diagnosis_phase_mixed_modes(monkeypatch, client):
     assert statuses["offline-1"] == "manual_required"
     assert statuses["file-1"] == "satisfied"
     assert [r.checklist_item_id for r in rows] == ["offline-1", "file-1"]
+
+
+@pytest.mark.asyncio
+async def test_diagnosis_fails_when_bid_index_wait_blocked(monkeypatch, client):
+    from datetime import datetime, timezone
+
+    from app.models import DiagnosisTask
+    from app.services import scheduler
+    from app.services.bid_index_wait import BidIndexBlockedError
+
+    async def boom(task_id, timeout=None):
+        del task_id, timeout
+        raise BidIndexBlockedError("bid_index_timeout")
+
+    wait_calls = {"n": 0}
+
+    async def tracked_wait(task_id, timeout=None):
+        wait_calls["n"] += 1
+        return await boom(task_id, timeout)
+
+    monkeypatch.setattr(scheduler, "wait_for_bid_index_ready", tracked_wait)
+
+    async def fake_report(task_id):
+        del task_id
+        return {
+            "categories": [
+                {
+                    "id": "c1",
+                    "name": "c",
+                    "items": [
+                        {
+                            "id": "file-1",
+                            "title": "执照",
+                            "requirement": "执照",
+                            "diagnosis_mode": "file",
+                            "consequence_rules": {},
+                        }
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(scheduler, "get_report", fake_report)
+
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session:
+        session.add(
+            DiagnosisTask(
+                id="task-idx-gate",
+                tender_filename="t.pdf",
+                tender_path="t.pdf",
+                bid_filename="b.docx",
+                bid_path="b.docx",
+                status="diagnosing",
+                progress_done=0,
+                progress_total=1,
+                background="",
+                requirements="",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    assert await scheduler._run_diagnosis_phase("task-idx-gate") is False
+    assert wait_calls["n"] == 1
+    async with db.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, "task-idx-gate")
+        assert task is not None
+        assert task.status == "failed"
+        assert task.failure_stage == "diagnosing"
+        assert "bid_index_timeout" in (task.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_diagnosis_skips_index_wait_when_all_offline(monkeypatch, client):
+    from datetime import datetime, timezone
+
+    from app.models import DiagnosisTask
+    from app.services import scheduler
+
+    wait_calls = {"n": 0}
+
+    async def tracked_wait(task_id, timeout=None):
+        del task_id, timeout
+        wait_calls["n"] += 1
+
+    monkeypatch.setattr(scheduler, "wait_for_bid_index_ready", tracked_wait)
+
+    class E:
+        def __init__(self, *a, **k):
+            pass
+
+        async def diagnose_category(self, **kwargs):
+            raise AssertionError("engine should not run for all-offline")
+
+    monkeypatch.setattr(scheduler, "AgentOSBatchDiagnosisEngine", E)
+
+    async def fake_report(task_id):
+        del task_id
+        return {
+            "categories": [
+                {
+                    "id": "c1",
+                    "name": "c",
+                    "items": [
+                        {
+                            "id": "offline-1",
+                            "title": "密封",
+                            "requirement": "密封",
+                            "diagnosis_mode": "offline",
+                            "consequence_rules": {},
+                        }
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(scheduler, "get_report", fake_report)
+
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session:
+        session.add(
+            DiagnosisTask(
+                id="task-all-offline",
+                tender_filename="t.pdf",
+                tender_path="t.pdf",
+                bid_filename="b.docx",
+                bid_path="b.docx",
+                status="diagnosing",
+                progress_done=0,
+                progress_total=1,
+                background="",
+                requirements="",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.commit()
+
+    assert await scheduler._run_diagnosis_phase("task-all-offline") is True
+    assert wait_calls["n"] == 0

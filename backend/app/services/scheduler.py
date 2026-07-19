@@ -6,15 +6,23 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from app import db as database
-from app.config import MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS
-from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
+from app.engine.batch_diagnosis_agent_os import (
+    AgentOSBatchDiagnosisEngine,
+    BatchDiagnosisResponseError,
+)
 from app.engine.checklist_agent_os import AgentOSChecklistAgent
 from app.engine.interpretation_agent_os import AgentOSInterpretationAgent
 from app.engine.retrieval_mock import MockRetrievalProvider
 from app.engine.retrieval_workspace import WorkspaceRetrievalProvider
 from app.models import DiagnosisResult, DiagnosisTask, WorkspaceFile, utcnow
 from app.services import interpret_report, report
-from app.services.agent_os import AgentOSClient, load_settings
+from app.services.agent_os import (
+    AgentOSClient,
+    AgentOSConfigError,
+    AgentOSError,
+    load_settings,
+)
+from app.services.bid_index_wait import BidIndexBlockedError, wait_for_bid_index_ready
 from app.services.checklist_service import (
     ChecklistService,
     ChecklistValidationError,
@@ -452,9 +460,21 @@ async def _mark_failed(
 
 
 async def _run_diagnosis_phase(task_id: str) -> bool:
-    """Run category-batch diagnosis. Returns False if stopped."""
+    """Run category-batch diagnosis. Returns False if stopped or failed."""
     checklist_report = await get_report(task_id)
     categories = checklist_report["categories"]
+
+    has_file_items = any(
+        (item.get("diagnosis_mode") or "file") != "offline"
+        for category in categories
+        for item in category["items"]
+    )
+    if has_file_items:
+        try:
+            await wait_for_bid_index_ready(task_id)
+        except BidIndexBlockedError as exc:
+            await _mark_failed(task_id, str(exc), "diagnosing")
+            return False
 
     async with database.SessionLocal() as session:
         task = await session.get(DiagnosisTask, task_id)
@@ -466,9 +486,7 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
         sort_order = items_done
 
     retrieval = build_retrieval_provider()
-    engine = MockBatchDiagnosisEngine(
-        delay_seconds=MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS
-    )
+    engine = AgentOSBatchDiagnosisEngine(client=AgentOSClient())
 
     cumulative = 0
     for category in categories:
@@ -489,18 +507,27 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
             result_by_id[item["id"]] = _offline_batch_result(item)
 
         if file_items:
-            retrieved_chunks = await retrieval.retrieve_for_category(
-                task_id=task_id,
-                category=category,
-                items=file_items,
-            )
-            batch_results = await engine.diagnose_category(
-                task_id=task_id,
-                category=category,
-                items=file_items,
-                retrieved_chunks=retrieved_chunks,
-            )
-            assert_batch_complete(file_items, batch_results)
+            try:
+                retrieved_chunks = await retrieval.retrieve_for_category(
+                    task_id=task_id,
+                    category=category,
+                    items=file_items,
+                )
+                batch_results = await engine.diagnose_category(
+                    task_id=task_id,
+                    category=category,
+                    items=file_items,
+                    retrieved_chunks=retrieved_chunks,
+                )
+                assert_batch_complete(file_items, batch_results)
+            except (
+                AgentOSConfigError,
+                AgentOSError,
+                BatchDiagnosisResponseError,
+                ValueError,
+            ) as exc:
+                await _mark_failed(task_id, str(exc)[:240], "diagnosing")
+                return False
             for batch_result in batch_results:
                 result_by_id[batch_result.checklist_item_id] = batch_result
 
