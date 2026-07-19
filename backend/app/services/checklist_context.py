@@ -27,6 +27,7 @@ SYSTEM_INSTRUCTIONS = """你是招标诊断检查项生成助手。
 6. source_references 必须含 coordinate_space=segment、segment_index、start、end、section，且偏移落在本分片内。
 7. 按预计命中的标书内容位置动态分类，输出 categories 与 items。
 8. schema_version 必须为 "1"。
+9. diagnosis_mode 只能是 file|offline；涉及装订/打印/密封/盖章等需线下核验的检查项标为 offline，其余为 file。
 输出必须是符合 schema 的 JSON 对象。"""
 
 

@@ -74,6 +74,13 @@ def _items_for_segment(segment: str, *, segment_index: int) -> list[dict[str, An
             if not requirement:
                 continue
             item_title = (title or requirement[:40]).rstrip("。")
+            offline_markers = ("装订", "打印", "密封", "盖章")
+            probe = f"{item_title}{requirement}"
+            diagnosis_mode = (
+                "offline"
+                if any(marker in probe for marker in offline_markers)
+                else "file"
+            )
             items.append(
                 {
                     "id": f"item-local-{len(items) + 1}",
@@ -102,6 +109,7 @@ def _items_for_segment(segment: str, *, segment_index: int) -> list[dict[str, An
                     "consequence_rules": {"general_risk": "存在合规风险"},
                     "admin_config_refs": [],
                     "sort_order": len(items) + 1,
+                    "diagnosis_mode": diagnosis_mode,
                     "_category_name": category_name,
                 }
             )
@@ -136,6 +144,7 @@ def _items_for_segment(segment: str, *, segment_index: int) -> list[dict[str, An
                 "consequence_rules": {"general_risk": "存在合规风险"},
                 "admin_config_refs": [],
                 "sort_order": 1,
+                "diagnosis_mode": "file",
                 "_category_name": category_name,
             }
         )

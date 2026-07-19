@@ -62,6 +62,7 @@ _CONTENT_SOURCE_VALUES = {
     "large_segments",
     "precise_search",
 }
+_DIAGNOSIS_MODE_VALUES = {"file", "offline"}
 _MAX_PUBLIC_ERROR_LENGTH = 240
 logger = logging.getLogger(__name__)
 
@@ -318,6 +319,7 @@ async def get_report(task_id: str) -> dict[str, Any]:
                 ),
                 "content_source": item.content_source,
                 "content_target": _load_json_object(item.content_target),
+                "diagnosis_mode": item.diagnosis_mode or "file",
                 "sort_order": item.sort_order,
             }
         )
@@ -584,6 +586,11 @@ def validate_draft(
             )
         content_target = item.content_target if isinstance(item.content_target, dict) else {}
         _validate_content_target(content_source, content_target, item.id)
+        diagnosis_mode = item.diagnosis_mode or "file"
+        if diagnosis_mode not in _DIAGNOSIS_MODE_VALUES:
+            raise ChecklistValidationError(
+                f"item {item.id} diagnosis_mode is invalid"
+            )
 
     if not isinstance(draft.raw_response, dict):
         raise ChecklistValidationError("raw_response must be a dict")
@@ -931,6 +938,7 @@ class ChecklistService:
                                 item.content_target or {},
                                 ensure_ascii=False,
                             ),
+                            diagnosis_mode=item.diagnosis_mode or "file",
                             sort_order=item.sort_order,
                         )
                         for item in draft.items

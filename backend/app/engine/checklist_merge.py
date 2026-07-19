@@ -116,6 +116,7 @@ def merge_checklist_drafts(
                         sort_order=len(final_items) + 1,
                         content_source=item.content_source or "precise_search",
                         content_target=dict(item.content_target or {}),
+                        diagnosis_mode=item.diagnosis_mode or "file",
                     )
                 )
 

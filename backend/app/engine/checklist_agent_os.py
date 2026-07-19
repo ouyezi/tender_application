@@ -16,6 +16,14 @@ TENDER_CHECKLIST_GENERATOR_APP_NAME = "tender_checklist_generator_app"
 
 InvokeFn = Callable[[str, dict[str, object]], Awaitable[dict[str, object]]]
 
+_DIAGNOSIS_MODE_VALUES = frozenset({"file", "offline"})
+
+
+def _normalize_diagnosis_mode(value: Any) -> str:
+    if isinstance(value, str) and value.strip() in _DIAGNOSIS_MODE_VALUES:
+        return value.strip()
+    return "file"
+
 
 class ChecklistAgentResponseError(ValueError):
     pass
@@ -184,6 +192,7 @@ def parse_checklist_payload(payload: dict[str, Any]) -> ChecklistDraft:
                 admin_config_refs=admin_config_refs,
                 sort_order=_as_sort_order(row.get("sort_order"), index),
                 content_target=content_target,
+                diagnosis_mode=_normalize_diagnosis_mode(row.get("diagnosis_mode")),
             )
         )
     known_category_ids = {category.id for category in categories}
@@ -211,6 +220,7 @@ def parse_checklist_payload(payload: dict[str, Any]) -> ChecklistDraft:
                     sort_order=item.sort_order,
                     content_source=item.content_source,
                     content_target=item.content_target,
+                    diagnosis_mode=item.diagnosis_mode,
                 )
             )
         else:

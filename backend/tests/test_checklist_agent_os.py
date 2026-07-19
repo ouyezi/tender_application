@@ -233,6 +233,41 @@ def test_parse_checklist_payload_fills_defaults_for_flash_sparse_output():
     assert draft.items[0].content_target.get("file_role") == "bid"
 
 
+def test_parse_checklist_payload_diagnosis_mode_defaults_and_normalizes():
+    base = _flash_sparse_payload()
+    base["items"] = [
+        {
+            **base["items"][0],
+            "id": "i-offline",
+            "title": "装订要求",
+            "diagnosis_mode": "offline",
+        },
+        {
+            **base["items"][0],
+            "id": "i-missing",
+            "title": "营业执照",
+        },
+        {
+            **base["items"][0],
+            "id": "i-weird",
+            "title": "资质证书",
+            "diagnosis_mode": "weird",
+        },
+        {
+            **base["items"][0],
+            "id": "i-file",
+            "title": "资格证明",
+            "diagnosis_mode": "  file  ",
+        },
+    ]
+    draft = parse_checklist_payload(base)
+    by_id = {item.id: item for item in draft.items}
+    assert by_id["i-offline"].diagnosis_mode == "offline"
+    assert by_id["i-missing"].diagnosis_mode == "file"
+    assert by_id["i-weird"].diagnosis_mode == "file"
+    assert by_id["i-file"].diagnosis_mode == "file"
+
+
 def test_parse_checklist_payload_rewrites_blank_or_unknown_category_id():
     payload = _flash_sparse_payload()
     payload["categories"].append({"id": "cat_scoring", "name": "评分响应"})
