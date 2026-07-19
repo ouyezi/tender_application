@@ -13,8 +13,8 @@ MOCK_ITEM_DELAY_SECONDS = 0.8
 # Kept for MockInterpretationAgent unit tests only; production uses Agent OS.
 MOCK_INTERPRET_DELAY_SECONDS = 0.5
 MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS = 0.5
-# Legacy flags — scheduler always uses AgentOSInterpretationAgent now.
-INTERPRETATION_AGENT = "mock"
+# Unused by scheduler (always AgentOSInterpretationAgent); kept for compatibility.
+INTERPRETATION_AGENT = "agent_os"
 INTERPRETATION_AGENT_URL = ""
 CHECKLIST_AGENT = "agent_os"
 CHECKLIST_AGENT_VERSION = "1"

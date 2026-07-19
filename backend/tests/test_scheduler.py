@@ -269,6 +269,29 @@ async def test_interpretation_failure_fails_task(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_tender_content_failure_fails_interpreting_stage(client, monkeypatch):
+    from app.services.tender_content import TenderContentError
+
+    class BoomProvider:
+        async def wait_for_markdown(self, task_id, file_id, *, stop_requested):
+            del task_id, file_id, stop_requested
+            raise TenderContentError("file-1: parse-failed")
+
+    monkeypatch.setattr(
+        scheduler,
+        "_build_tender_content_provider",
+        lambda: BoomProvider(),
+    )
+    await _seed_configs(client, 1)
+    body = await _create_task(client)
+    status = await scheduler.wait_for_terminal(body["id"], timeout=10)
+    assert status == "failed"
+    detail = (await client.get(f"/api/tasks/{body['id']}")).json()
+    assert detail.get("failure_stage") == "interpreting"
+    assert "parse-failed" in (detail.get("error_message") or "")
+
+
+@pytest.mark.asyncio
 async def test_cannot_pause_while_interpreting(client, monkeypatch):
     gate = asyncio.Event()
 
@@ -340,6 +363,8 @@ async def test_stop_during_interpreting(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_parse_failed_marks_failed_with_failure_stage(client, monkeypatch):
+    # Checklist-stage wait_for_tender_parse_ready under conftest interpret stub;
+    # not the real TenderContentProvider wait during interpretation.
     from app.services.checklist_service import TenderParseBlockedError
 
     async def blocked_wait(task_id, timeout=300.0):
@@ -434,6 +459,8 @@ async def test_stop_during_generating_checklist(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_parse_failed_via_workspace_file(client, monkeypatch):
+    # Checklist-stage wait_for_tender_parse_ready under conftest interpret stub;
+    # not the real TenderContentProvider wait during interpretation.
     from app.services.checklist_service import TenderParseBlockedError
 
     gate = asyncio.Event()
