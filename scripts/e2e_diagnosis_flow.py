@@ -44,7 +44,15 @@ def main() -> int:
         return 2
 
     base = args.base_url.rstrip("/")
-    with httpx.Client(base_url=base, timeout=120.0) as client:
+    # Large bid uploads (≈1GB) need a long write timeout; poll uses a shorter read timeout.
+    upload_timeout = httpx.Timeout(
+        connect=30.0,
+        read=120.0,
+        write=max(3600.0, args.timeout_seconds),
+        pool=30.0,
+    )
+    poll_timeout = httpx.Timeout(120.0)
+    with httpx.Client(base_url=base, timeout=upload_timeout) as client:
         with args.tender.open("rb") as tf, args.bid.open("rb") as bf:
             resp = client.post(
                 "/api/tasks",
@@ -59,6 +67,7 @@ def main() -> int:
         task_id = task["id"]
         print(f"created task {task_id}")
 
+        client.timeout = poll_timeout
         deadline = time.time() + args.timeout_seconds
         detail = task
         while time.time() < deadline:
