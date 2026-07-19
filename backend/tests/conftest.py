@@ -4,7 +4,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app import config
 from app.db import get_db
+from app.engine.batch_diagnosis_mock import MockBatchDiagnosisEngine
 from app.main import app
 from app.models import Base
 from app.services import index_scheduler, parse_scheduler, scheduler
@@ -98,6 +100,23 @@ async def client(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.services.scheduler._build_interpretation_agent",
         lambda: _StubInterpretationAgent(),
+    )
+
+    class _StubBatchDiagnosisEngine(MockBatchDiagnosisEngine):
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+            super().__init__(delay_seconds=config.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS)
+
+    async def _noop_bid_index_wait(task_id, timeout=None):
+        del task_id, timeout
+
+    monkeypatch.setattr(
+        "app.services.scheduler.AgentOSBatchDiagnosisEngine",
+        _StubBatchDiagnosisEngine,
+    )
+    monkeypatch.setattr(
+        "app.services.scheduler.wait_for_bid_index_ready",
+        _noop_bid_index_wait,
     )
 
     async def _fake_parse_pipeline(file_id: str, task_id: str, stored_path: str):
