@@ -1,6 +1,6 @@
 # 标书诊断 Demo
 
-本地可运行的标书诊断演示系统：上传招标文件与标书后发起诊断任务，流水线为「解读 → 检查项生成 → 分类批诊断」；管理端可配置诊断项模板并监控任务进度；另含**工作区管理**，按任务 Artifact 导入文件、异步解析并浏览文档树与章节内容。解读、检查项生成与诊断引擎默认为 Mock 实现，不调用真实 LLM，也不包含登录鉴权。
+本地可运行的标书诊断演示系统：上传招标文件与标书后发起诊断任务，流水线为「解读 → 检查项生成 → 分类批诊断」；管理端可配置诊断项模板并监控任务进度；另含**工作区管理**，按任务 Artifact 导入文件、异步解析并浏览文档树与章节内容。解读、检查项生成与分类批诊断均通过 Agent OS 调用（批诊断应用 `tender_batch_diagnosis_app`）；本地单测仍使用 Mock 桩，不依赖真实 LLM，也不包含登录鉴权。
 
 ## 环境准备
 
@@ -105,7 +105,7 @@ cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5555
 ## 说明
 
 - **无鉴权**：所有接口公开可用，仅用于本地演示。
-- **引擎现状**：检查项生成与文档检索 AI 步骤（知识块富化、Wiki 文案、查询重写、AI 重排）通过 Agent OS 应用调用；解读与分类批诊断当前仍为 Mock。诊断阶段按任务生成的检查项清单批量执行，不再以创建时的全局诊断配置作为执行清单。
+- **引擎现状**：解读、检查项生成、分类批诊断与文档检索 AI 步骤均通过 Agent OS 应用调用（批诊断为 `tender_batch_diagnosis_app`）。诊断阶段按任务生成的检查项清单批量执行，不再以创建时的全局诊断配置作为执行清单。真实文件端到端验收：`scripts/e2e_diagnosis_flow.py`（需配置 Agent OS 与解析/索引环境）。
 - **存储**：SQLite 数据库 + 本地 `uploads/`、`reports/` 目录（均已加入 `.gitignore`）。
 - **测试**：`cd backend && ../.venv/bin/python -m pytest`
 
@@ -115,6 +115,7 @@ cd frontend && npm install && npm run dev -- --host 0.0.0.0 --port 5555
 - **禁止**在业务模块直接用 `httpx` / `requests` 等访问 Agent OS 的 `/v1/apps/*`。
 - 连接配置：环境变量或项目根 `config.local.json` 的 `agentOs` 块；`docs/agents_config/*.json` 仅为已发布契约快照，不承载密钥。
 - 当前已接入应用（运行时以各适配器常量为准）：
-  - `tender_doc_interpreter_app`（解读，若已接线）
+  - `tender_doc_interpreter_app`（解读）
   - `tender_checklist_generator_app`（检查项生成）
+  - `tender_batch_diagnosis_app`（分类批诊断）
   - `retrieval_chunk_enricher_app` / `retrieval_wiki_writer_app` / `retrieval_query_rewriter_app` / `retrieval_ai_reranker_app`（文档检索）
