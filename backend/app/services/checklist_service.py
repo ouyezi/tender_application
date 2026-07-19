@@ -62,9 +62,15 @@ _CONTENT_SOURCE_VALUES = {
     "large_segments",
     "precise_search",
 }
-_DIAGNOSIS_MODE_VALUES = {"file", "offline"}
+_DIAGNOSIS_MODE_VALUES = frozenset({"file", "offline"})
 _MAX_PUBLIC_ERROR_LENGTH = 240
 logger = logging.getLogger(__name__)
+
+
+def _normalize_diagnosis_mode(value: Any) -> str:
+    if isinstance(value, str) and value.strip() in _DIAGNOSIS_MODE_VALUES:
+        return value.strip()
+    return "file"
 
 
 @dataclass
@@ -319,7 +325,7 @@ async def get_report(task_id: str) -> dict[str, Any]:
                 ),
                 "content_source": item.content_source,
                 "content_target": _load_json_object(item.content_target),
-                "diagnosis_mode": item.diagnosis_mode or "file",
+                "diagnosis_mode": _normalize_diagnosis_mode(item.diagnosis_mode),
                 "sort_order": item.sort_order,
             }
         )
@@ -586,11 +592,6 @@ def validate_draft(
             )
         content_target = item.content_target if isinstance(item.content_target, dict) else {}
         _validate_content_target(content_source, content_target, item.id)
-        diagnosis_mode = item.diagnosis_mode or "file"
-        if diagnosis_mode not in _DIAGNOSIS_MODE_VALUES:
-            raise ChecklistValidationError(
-                f"item {item.id} diagnosis_mode is invalid"
-            )
 
     if not isinstance(draft.raw_response, dict):
         raise ChecklistValidationError("raw_response must be a dict")
@@ -653,6 +654,7 @@ def _build_published_payload(
     for item in items:
         item["id"] = item_map[item["id"]]
         item["category_id"] = category_map[item["category_id"]]
+        item["diagnosis_mode"] = _normalize_diagnosis_mode(item.get("diagnosis_mode"))
     payload = {
         "schema_version": draft.schema_version,
         "categories": categories,
@@ -938,7 +940,9 @@ class ChecklistService:
                                 item.content_target or {},
                                 ensure_ascii=False,
                             ),
-                            diagnosis_mode=item.diagnosis_mode or "file",
+                            diagnosis_mode=_normalize_diagnosis_mode(
+                                item.diagnosis_mode
+                            ),
                             sort_order=item.sort_order,
                         )
                         for item in draft.items

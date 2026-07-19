@@ -156,6 +156,46 @@ async def create_task_source(tmp_path: Path, task_id: str = "task-checklist"):
 
 
 @pytest.mark.asyncio
+async def test_generate_persists_offline_diagnosis_mode_in_get_report(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import ChecklistService, get_report
+
+    tender_markdown = await create_task_source(tmp_path)
+    draft = valid_draft(tender_markdown)
+    draft = replace(
+        draft,
+        items=[replace(draft.items[0], diagnosis_mode="offline")],
+    )
+
+    await ChecklistService(StaticAgent(draft)).generate_for_task("task-checklist")
+    report = await get_report("task-checklist")
+
+    assert report["categories"][0]["items"][0]["diagnosis_mode"] == "offline"
+
+
+@pytest.mark.asyncio
+async def test_invalid_diagnosis_mode_normalizes_to_file_without_failing(
+    client, tmp_path
+):
+    del client
+    from app.services.checklist_service import ChecklistService, get_report
+
+    tender_markdown = await create_task_source(tmp_path)
+    draft = valid_draft(tender_markdown)
+    draft = replace(
+        draft,
+        items=[replace(draft.items[0], diagnosis_mode="weird")],
+    )
+
+    await ChecklistService(StaticAgent(draft)).generate_for_task("task-checklist")
+    report = await get_report("task-checklist")
+
+    assert report["categories"][0]["items"][0]["diagnosis_mode"] == "file"
+
+
+@pytest.mark.asyncio
 async def test_generate_persists_rows_pointer_progress_and_artifacts(
     client, tmp_path
 ):
