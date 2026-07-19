@@ -547,8 +547,8 @@ async def _run(task_id: str) -> None:
                 task.updated_at = utcnow()
                 await session.commit()
 
-            tender_path = task.tender_path
             background = task.background or ""
+            requirements = task.requirements or ""
             need_checklist = task.current_checklist_generation_id is None
 
         if need_interpret:
@@ -559,8 +559,9 @@ async def _run(task_id: str) -> None:
             agent = MockInterpretationAgent(delay_seconds=MOCK_INTERPRET_DELAY_SECONDS)
             interpret_result = await agent.interpret(
                 task_id=task_id,
-                tender_path=tender_path,
+                tender_text="",
                 background=background,
+                requirements=requirements,
             )
             if _should_stop(task_id):
                 await _mark_stopped(task_id)
