@@ -128,6 +128,9 @@ class ChecklistItem(Base):
     content_target: Mapped[str] = mapped_column(
         Text, nullable=False, default="{}", server_default="{}"
     )
+    diagnosis_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="file", server_default="file"
+    )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow

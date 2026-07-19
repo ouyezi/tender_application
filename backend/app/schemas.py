@@ -89,6 +89,7 @@ class ChecklistItemOut(BaseModel):
     admin_config_refs: List[int]
     content_source: str = "precise_search"
     content_target: dict = {}
+    diagnosis_mode: str = "file"
     sort_order: int
 
 

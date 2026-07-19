@@ -127,6 +127,14 @@ async def test_migrate_adds_tender_file_id_to_legacy_tasks_table(tmp_path, monke
             "checklist_items",
         }
 
+        checklist_item_columns = {
+            row[1]
+            for row in (
+                await conn.execute(text("PRAGMA table_info('checklist_items')"))
+            ).fetchall()
+        }
+        assert "diagnosis_mode" in checklist_item_columns
+
         result_columns = {
             row[1]
             for row in (
@@ -238,5 +246,6 @@ async def test_migrate_adds_checklist_content_source_columns(tmp_path, monkeypat
         }
         assert "content_source" in columns
         assert "content_target" in columns
+        assert "diagnosis_mode" in columns
 
     await engine.dispose()

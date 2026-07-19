@@ -70,6 +70,7 @@ class ChecklistItemDraft:
     sort_order: int
     content_source: str = "precise_search"
     content_target: dict[str, Any] = field(default_factory=dict)
+    diagnosis_mode: str = "file"
 
 
 @dataclass(frozen=True)
