@@ -73,6 +73,27 @@ def test_load_settings_falls_back_to_local_json(tmp_path, monkeypatch):
     assert settings.max_attempts == 3
 
 
+def test_load_settings_parse_wait_timeout(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.local.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "agentOs": {"baseUrl": "http://localhost:8000"},
+                "tenderInterpretation": {"parseWaitTimeoutSeconds": 600},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", cfg)
+    monkeypatch.delenv("TENDER_PARSE_WAIT_TIMEOUT_SECONDS", raising=False)
+    settings = agent_os.load_settings()
+    assert settings.parse_wait_timeout_seconds == 600.0
+
+    monkeypatch.setenv("TENDER_PARSE_WAIT_TIMEOUT_SECONDS", "100")
+    settings = agent_os.load_settings()
+    assert settings.parse_wait_timeout_seconds == 100.0
+
+
 def test_load_settings_missing_base_url_is_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
     for key in ("AGENT_OS_BASE_URL",):

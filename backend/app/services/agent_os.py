@@ -25,6 +25,7 @@ class AgentOSSettings:
     auth_cookie: str = ""
     auth_header_name: str = ""
     auth_header_value: str = ""
+    parse_wait_timeout_seconds: float = 1800.0
 
 
 class AgentOSError(Exception):
@@ -88,6 +89,11 @@ def load_settings(path: Optional[Path] = None) -> AgentOSSettings:
     local = _read_local_config(cfg_path)
     agent_os = local.get("agentOs") if isinstance(local.get("agentOs"), dict) else {}
     auth = agent_os.get("auth") if isinstance(agent_os.get("auth"), dict) else {}
+    tender_interp = (
+        local.get("tenderInterpretation")
+        if isinstance(local.get("tenderInterpretation"), dict)
+        else {}
+    )
     return AgentOSSettings(
         base_url=str(_env_or(agent_os.get("baseUrl"), "AGENT_OS_BASE_URL", "")).rstrip(
             "/"
@@ -106,6 +112,14 @@ def load_settings(path: Optional[Path] = None) -> AgentOSSettings:
         ),
         auth_header_value=str(
             _env_or(auth.get("headerValue"), "AGENT_OS_AUTH_HEADER_VALUE", "")
+        ),
+        parse_wait_timeout_seconds=_as_float(
+            _env_or(
+                tender_interp.get("parseWaitTimeoutSeconds"),
+                "TENDER_PARSE_WAIT_TIMEOUT_SECONDS",
+                1800,
+            ),
+            1800.0,
         ),
     )
 

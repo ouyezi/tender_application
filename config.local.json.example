@@ -8,5 +8,8 @@
       "headerName": "",
       "headerValue": ""
     }
+  },
+  "tenderInterpretation": {
+    "parseWaitTimeoutSeconds": 1800
   }
 }
