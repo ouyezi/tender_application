@@ -6,7 +6,6 @@ import pytest
 
 from app import db
 from app.models import DiagnosisTask
-from app.services.execution_graph import get_tracker
 
 
 def _pdf_bytes():
@@ -36,7 +35,6 @@ async def test_execution_graph_not_found(client):
 @pytest.mark.asyncio
 async def test_execution_graph_after_create(client):
     task_id = await _create_task(client)
-    await get_tracker(task_id).init_graph()
     r = await client.get(f"/api/tasks/{task_id}/execution-graph")
     assert r.status_code == 200
     body = r.json()
@@ -45,6 +43,8 @@ async def test_execution_graph_after_create(client):
     keys = {n["key"] for n in body["nodes"]}
     assert "parse.tender" in keys
     assert "diagnosis" in keys
+    parse_tender = next(n for n in body["nodes"] if n["key"] == "parse.tender")
+    assert parse_tender["status"] == "pending"
     assert body["summary"]["total_nodes"] >= 10
 
 

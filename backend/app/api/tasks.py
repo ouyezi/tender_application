@@ -15,6 +15,7 @@ from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
 from app.schemas import ChecklistReportOut, ExecutionGraphOut, TaskListOut, TaskOut
 from app.services import checklist_service, files, parse_scheduler, scheduler, task_delete, workspace
+from app.services.execution_graph import get_tracker
 from app.services.execution_graph.query import build_execution_graph_response
 from app.services.checklist_service import (
     ChecklistNotAvailable,
@@ -153,6 +154,8 @@ async def create_task(
     )
     await db.commit()
     await db.refresh(task)
+
+    await get_tracker(task_id).init_graph()
 
     await parse_scheduler.kick()
     await scheduler.start_task(task_id)
