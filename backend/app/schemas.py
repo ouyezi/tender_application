@@ -229,6 +229,7 @@ class ExecutionNodeOut(BaseModel):
     kind: str
     status: str
     parent_key: Optional[str] = None
+    sort_order: int = 0
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     duration_ms: Optional[int] = None

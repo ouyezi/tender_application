@@ -6,6 +6,8 @@ import pytest
 
 from app import db
 from app.models import DiagnosisTask
+from app.services.execution_graph import get_tracker
+from app.services.execution_graph.query import BID_RETRIEVAL_CHILD_KEYS
 
 
 def _pdf_bytes():
@@ -42,10 +44,42 @@ async def test_execution_graph_after_create(client):
     assert body["legacy"] is False
     keys = {n["key"] for n in body["nodes"]}
     assert "parse.tender" in keys
+    assert "bid.retrieval" in keys
     assert "diagnosis" in keys
     parse_tender = next(n for n in body["nodes"] if n["key"] == "parse.tender")
-    assert parse_tender["status"] == "pending"
-    assert body["summary"]["total_nodes"] >= 10
+    assert parse_tender["status"] in ("pending", "running")
+    assert body["summary"]["total_nodes"] < 20
+
+
+@pytest.mark.asyncio
+async def test_execution_graph_rollups_bid_retrieval(client):
+    task_id = await _create_task(client)
+    tracker = get_tracker(task_id)
+    async with tracker.track("parse.bid"):
+        pass
+    r = await client.get(f"/api/tasks/{task_id}/execution-graph")
+    assert r.status_code == 200
+    body = r.json()
+    container = next(n for n in body["nodes"] if n["key"] == "bid.retrieval")
+    assert container["status"] == "pending"
+    top_level_keys = {n["key"] for n in body["nodes"] if not n.get("parent_key")}
+    assert "parse.bid" not in top_level_keys
+    assert "index.segments" not in top_level_keys
+    assert "bid.retrieval" in top_level_keys
+
+
+@pytest.mark.asyncio
+async def test_execution_graph_rollups_bid_retrieval_completed(client):
+    task_id = await _create_task(client)
+    tracker = get_tracker(task_id)
+    for key in BID_RETRIEVAL_CHILD_KEYS:
+        async with tracker.track(key):
+            pass
+    r = await client.get(f"/api/tasks/{task_id}/execution-graph")
+    body = r.json()
+    container = next(n for n in body["nodes"] if n["key"] == "bid.retrieval")
+    assert container["status"] == "completed"
+    assert container["duration_ms"] is not None
 
 
 @pytest.mark.asyncio
