@@ -76,7 +76,9 @@ class AgentOSContextResolver:
         payload: dict[str, Any],
         candidates: list[str],
     ) -> dict[str, list[str]]:
-        response = await self._invoke(payload)
+        response = await self._invoke(
+            {"payload_json": json.dumps(payload, ensure_ascii=False)}
+        )
 
         actions = _require_string_list(
             _parse_string_list(
