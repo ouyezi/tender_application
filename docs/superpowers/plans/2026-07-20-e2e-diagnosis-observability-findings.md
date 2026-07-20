@@ -713,43 +713,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # Allow `python scripts/e2e_diagnosis_flow.py` without installing package
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    raise SystemExit(main())
-```
-
-注意：`sys.path.insert` 必须在 `from e2e_diagnosis_observability import ...` **之前**。把 path insert 挪到文件顶部 import 区：
-
-将文件开头的 import 段改为：
-
-```python
-from __future__ import annotations
-
-import argparse
-import sys
-import time
-from datetime import datetime, timezone
-from pathlib import Path
-
-_SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPT_DIR))
-
-import httpx
-
-from e2e_diagnosis_observability import (
-    build_findings_markdown,
-    build_results_summary,
-    build_stage_durations,
-    compute_bid_index_ready_at,
-    write_json,
-)
-```
-
-并删除 `if __name__` 里重复的 `sys.path.insert`，保留：
-
-```python
-if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
