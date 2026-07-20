@@ -1,0 +1,100 @@
+{
+  "agent": {
+    "id": "agt_b11415a8",
+    "code": "agent_050",
+    "zhName": "精确检索上下文裁决助手",
+    "enName": "retrieval_context_resolver",
+    "description": "依据招标诊断精确检索上下文，从规则候选动作中裁决是否补充父章节引言、父正文或兄弟块。",
+    "publishedVersion": 1,
+    "publishedAt": "2026-07-20T15:10:51+08:00",
+    "createdAt": "2026-07-20T15:10:38+08:00"
+  },
+  "application": {
+    "id": "app_77340f3a",
+    "name": "精确检索上下文裁决",
+    "enName": "retrieval_context_resolver_app",
+    "agentId": "agt_b11415a8",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 60000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "published",
+    "publishedAt": "2026-07-20T15:10:51+08:00"
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "retrieval_context_resolver_app",
+    "requiredInputs": [
+      "payload_json"
+    ],
+    "optionalInputs": []
+  },
+  "model": {
+    "modelId": "mdl_780e2fbe",
+    "modelName": "qwen3.6-flash",
+    "temperature": 0.2,
+    "thinking": false
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_payload_json",
+        "name": "payload_json",
+        "description": "检索上下文 JSON 字符串，含 requirement、query、hits、parent、siblings、candidates",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": [
+      {
+        "id": "f_actions_json",
+        "name": "actions_json",
+        "description": "采纳的动作 JSON 数组字符串，如 [\"add_parent_intro\",\"add_siblings\"]",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_sibling_chunk_ids_json",
+        "name": "sibling_chunk_ids_json",
+        "description": "需补充的兄弟块 chunk_id JSON 数组字符串",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      },
+      {
+        "id": "f_reason",
+        "name": "reason",
+        "description": "裁决理由（可选）",
+        "type": "string",
+        "required": false,
+        "children": null,
+        "itemType": null
+      }
+    ]
+  },
+  "prompt": {
+    "systemPrompt": "你是招标诊断精确检索的「上下文裁决」助手。\n\n输入 payload_json 为 JSON 字符串，字段含义：\n- requirement：检查项要求或检索要求\n- query：检索 query\n- hits：已命中的 fine 块列表（含 chunk_id、title、summary、title_path）\n- parent：最近 large 父块（含 chunk_id、title、summary、title_path、intro_chars、total_chars）\n- siblings：父块下候选兄弟 fine 块（含 chunk_id、title、summary、title_path、distance）\n- candidates：规则预筛出的候选动作，仅可能包含 add_parent_intro、add_parent_body、add_siblings、keep_only\n\npayload_json：\n{{payload_json}}\n\n要求：\n1. 仅依据 payload 中的检索上下文做裁决，actions 必须是 candidates 的子集，不得编造候选外动作。\n2. 必须通过结构化输出字段 actions_json 返回结果：该字段值为 JSON 数组字符串，例如 \"[\\\"add_parent_intro\\\",\\\"add_siblings\\\"]\"。\n3. sibling_chunk_ids_json 必须是输入 siblings 中 chunk_id 的子集；当 actions 不含 add_siblings 时应返回 \"[]\"。\n4. 当 query/requirement 涉及子公司资质、授权、法人资格等，且 siblings 中存在授权书、主公司授权、母公司证明等相关兄弟块时，应优先在 sibling_chunk_ids_json 中纳入对应兄弟块；若 candidates 含 add_parent_intro 且父引言可能含法人/资格要求，应一并纳入 actions。\n5. 可选字段 reason 用一句话说明裁决依据；禁止输出其它解释性自然语言。",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 0,
+    "timeoutMs": 60000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
+  }
+}
