@@ -67,11 +67,43 @@ async def test_rerank_prefers_chunk_ids_json_over_output():
 
 
 @pytest.mark.asyncio
-async def test_rerank_unknown_id_raises():
+async def test_rerank_repairs_unknown_ids_to_input_order():
     async def fake_invoke(app_name, input_data):
         del app_name, input_data
         return {"chunk_ids_json": json.dumps(["c9"])}
 
     reranker = AgentOSAiReranker(invoke_app=fake_invoke)
-    with pytest.raises(AiRerankResponseError):
-        await reranker.rerank("q", [_hit("c1")])
+    out = await reranker.rerank("q", [_hit("c1")])
+    assert out == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_rerank_repairs_partial_order_and_appends_missing():
+    async def fake_invoke(app_name, input_data):
+        del app_name, input_data
+        return {"chunk_ids_json": json.dumps(["c2", "c9"])}
+
+    reranker = AgentOSAiReranker(invoke_app=fake_invoke)
+    out = await reranker.rerank("q", [_hit("c1"), _hit("c2")])
+    assert out == ["c2", "c1"]
+
+
+@pytest.mark.asyncio
+async def test_rerank_dedupes_duplicate_ids():
+    async def fake_invoke(app_name, input_data):
+        del app_name, input_data
+        return {"chunk_ids_json": json.dumps(["c2", "c1", "c2"])}
+
+    reranker = AgentOSAiReranker(invoke_app=fake_invoke)
+    out = await reranker.rerank("q", [_hit("c1"), _hit("c2")])
+    assert out == ["c2", "c1"]
+
+
+@pytest.mark.asyncio
+async def test_rerank_empty_hits_skips_invoke():
+    async def fake_invoke(app_name, input_data):
+        raise AssertionError("should not invoke")
+
+    reranker = AgentOSAiReranker(invoke_app=fake_invoke)
+    out = await reranker.rerank("q", [])
+    assert out == []
