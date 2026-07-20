@@ -14,3 +14,6 @@ dist/
 # Agent create-publish skill local config (may contain auth)
 .cursor/skills/**/config.local.json
 config.local.json
+
+# E2E evidence packs (may include large report.docx)
+artifacts/
