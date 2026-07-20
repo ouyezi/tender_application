@@ -119,10 +119,12 @@ async def client(tmp_path, monkeypatch):
         _noop_bid_index_wait,
     )
 
-    async def _fake_parse_pipeline(file_id: str, task_id: str, stored_path: str):
+    async def _fake_parse_pipeline(
+        file_id: str, task_id: str, stored_path: str, **kwargs
+    ):
         from app.services import artifact
 
-        del stored_path
+        del stored_path, kwargs
         root = artifact.ensure_artifact_dirs(task_id)
         md_path = root / "markdown" / f"{file_id}.md"
         md_path.parent.mkdir(parents=True, exist_ok=True)
