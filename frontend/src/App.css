@@ -15,6 +15,12 @@
   --font: "IBM Plex Sans", "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
   --radius: 8px;
+  --node-pending: #9ca3af;
+  --node-running: #175cd3;
+  --node-completed: #1a7a4c;
+  --node-failed: #b42318;
+  --node-interrupted: #c2410c;
+  --node-skipped: #d1d5db;
 }
 
 * {
@@ -2069,4 +2075,252 @@ a:hover {
   white-space: nowrap;
   font-size: 0.85rem;
   color: var(--danger, #b91c1c);
+}
+
+/* —— Task process page —— */
+.task-process-page {
+  max-width: 1200px;
+}
+
+.task-process-page .page-header-titles {
+  align-items: center;
+}
+
+.task-process-id {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.process-link {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.process-legacy-message {
+  margin-top: 1rem;
+}
+
+.process-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.process-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.process-summary-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.process-summary-value {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.process-layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.process-graph-panel {
+  min-height: 480px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.execution-graph-canvas {
+  width: 100%;
+  height: 480px;
+}
+
+.process-detail-panel {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.process-detail-panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.process-detail-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.process-detail-list dt {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.process-detail-list dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+}
+
+.process-meta-block {
+  margin-top: 1rem;
+}
+
+.process-meta-block h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.process-meta-json {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: #f4f6f8;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* —— Execution graph nodes —— */
+.execution-node {
+  width: 180px;
+  padding: 0.5rem 0.65rem;
+  border: 2px solid var(--node-pending);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.execution-node-selected {
+  box-shadow: 0 0 0 3px rgba(23, 92, 211, 0.2);
+}
+
+.execution-node-label {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-bottom: 0.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.execution-node-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.execution-node-status {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.execution-node-duration {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.execution-node.node-pending {
+  border-color: var(--node-pending);
+}
+
+.execution-node.node-running {
+  border-color: var(--node-running);
+  animation: node-running-pulse 1.6s ease-in-out infinite;
+}
+
+.execution-node.node-completed {
+  border-color: var(--node-completed);
+}
+
+.execution-node.node-failed {
+  border-color: var(--node-failed);
+}
+
+.execution-node.node-interrupted {
+  border-color: var(--node-interrupted);
+}
+
+.execution-node.node-skipped {
+  border-color: var(--node-skipped);
+  opacity: 0.75;
+}
+
+.node-status-pending {
+  color: var(--node-pending);
+}
+
+.node-status-running {
+  color: var(--node-running);
+}
+
+.node-status-completed {
+  color: var(--node-completed);
+}
+
+.node-status-failed {
+  color: var(--node-failed);
+}
+
+.node-status-interrupted {
+  color: var(--node-interrupted);
+}
+
+.node-status-skipped {
+  color: var(--node-skipped);
+}
+
+@keyframes node-running-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(23, 92, 211, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(23, 92, 211, 0);
+  }
+}
+
+@media (max-width: 900px) {
+  .process-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .process-detail-panel {
+    order: -1;
+  }
 }

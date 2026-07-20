@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import TaskListPage from './pages/TaskListPage'
 import TaskDetailPage from './pages/TaskDetailPage'
+import TaskProcessPage from './pages/TaskProcessPage.jsx'
 import WorkspaceListPage from './pages/WorkspaceListPage'
 import WorkspaceDetailPage from './pages/WorkspaceDetailPage'
 import KnowledgeDebugPage from './pages/KnowledgeDebugPage'
@@ -15,6 +16,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<TaskListPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
+        <Route path="/tasks/:id/process" element={<TaskProcessPage />} />
         <Route path="/workspaces" element={<WorkspaceListPage />} />
         <Route path="/workspaces/:taskId" element={<WorkspaceDetailPage />} />
         <Route path="/workspaces/:taskId/knowledge" element={<KnowledgeDebugPage />} />

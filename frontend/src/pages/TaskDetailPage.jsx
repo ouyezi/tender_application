@@ -104,6 +104,9 @@ export default function TaskDetailPage() {
           <span className={`status-badge status-${status}`}>{label}</span>
         </div>
         <div className="page-header-actions">
+          <Link className="process-link" to={`/tasks/${id}/process`}>
+            查看进程 →
+          </Link>
           <Link className="btn btn-secondary" to={`/workspaces/${task.id}`}>
             打开工作区
           </Link>
