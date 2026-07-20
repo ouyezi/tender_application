@@ -5,8 +5,8 @@
     "zhName": "招标文件解读助手",
     "enName": "tender_doc_interpreter",
     "description": "阅读招标文件全文，结合项目背景与额外解读要求，结构化提取项目基础信息、投标人资格（区分实质性要求）、全部废标条款、评标评分细则、采购需求（标记★强制条款）、合同要点、投标文件格式组成，输出解读报告，支撑标书目录生成、标书编制与投标合规诊断。",
-    "publishedVersion": 3,
-    "publishedAt": "2026-07-18T12:37:00+08:00",
+    "publishedVersion": 4,
+    "publishedAt": "2026-07-20T10:02:36+08:00",
     "createdAt": "2026-07-17T14:14:15+08:00"
   },
   "application": {
