@@ -11,6 +11,7 @@ from app.models import (
     DiagnosisConfig,
     DiagnosisResult,
     DiagnosisTask,
+    ExecutionNode,
 )
 
 
@@ -255,6 +256,24 @@ async def test_recover_interrupted_tasks(tmp_path, monkeypatch):
                 ),
             ]
         )
+        session.add_all(
+            [
+                ExecutionNode(
+                    task_id="task-running",
+                    node_key="interpret",
+                    label="Interpret",
+                    kind="stage",
+                    status="running",
+                ),
+                ExecutionNode(
+                    task_id="task-done",
+                    node_key="interpret",
+                    label="Interpret",
+                    kind="stage",
+                    status="completed",
+                ),
+            ]
+        )
         await session.commit()
 
     await recover_interrupted_tasks()
@@ -292,5 +311,24 @@ async def test_recover_interrupted_tasks(tmp_path, monkeypatch):
         assert interrupted_generation.error_message == "interrupted"
         assert interrupted_generation.finished_at is not None
         assert completed_generation.status == "succeeded"
+
+        running_node = (
+            await session.scalars(
+                select(ExecutionNode).where(
+                    ExecutionNode.task_id == "task-running",
+                    ExecutionNode.node_key == "interpret",
+                )
+            )
+        ).one()
+        completed_node = (
+            await session.scalars(
+                select(ExecutionNode).where(
+                    ExecutionNode.task_id == "task-done",
+                    ExecutionNode.node_key == "interpret",
+                )
+            )
+        ).one()
+        assert running_node.status == "interrupted"
+        assert completed_node.status == "completed"
 
     await engine.dispose()

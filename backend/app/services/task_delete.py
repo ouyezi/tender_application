@@ -12,6 +12,8 @@ from app.models import (
     ChecklistItem,
     DiagnosisResult,
     DiagnosisTask,
+    ExecutionEdge,
+    ExecutionNode,
     IndexJob,
     KnowledgeChunk,
     ParseJob,
@@ -87,6 +89,8 @@ async def delete_task(session: AsyncSession, task_id: str) -> None:
             delete(ChecklistGeneration).where(ChecklistGeneration.id.in_(generation_ids))
         )
 
+    await session.execute(delete(ExecutionEdge).where(ExecutionEdge.task_id == task_id))
+    await session.execute(delete(ExecutionNode).where(ExecutionNode.task_id == task_id))
     await session.execute(delete(ParseJob).where(ParseJob.task_id == task_id))
     await session.execute(delete(IndexJob).where(IndexJob.task_id == task_id))
     await session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.task_id == task_id))

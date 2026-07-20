@@ -12,6 +12,7 @@ from app.models import (
     Base,
     ChecklistGeneration,
     DiagnosisTask,
+    ExecutionNode,
     IndexJob,
     KnowledgeChunk,
     KnowledgeTag,
@@ -167,6 +168,11 @@ async def recover_interrupted_tasks() -> None:
                 error_message="interrupted",
                 finished_at=now,
             )
+        )
+        await session.execute(
+            update(ExecutionNode)
+            .where(ExecutionNode.status == "running")
+            .values(status="interrupted")
         )
         await session.commit()
 
