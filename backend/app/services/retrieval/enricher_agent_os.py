@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Awaitable, Callable, Optional
 
+from app import config
 from app.services.agent_os import AgentOSClient
 from app.services.retrieval.types import SegmentDraft
 
@@ -50,6 +51,110 @@ def _filter_tags(
     return result
 
 
+def _segment_dict(seg: SegmentDraft, *, text: str | None = None) -> dict[str, object]:
+    return {
+        "chunk_id": seg.chunk_id,
+        "title_path": seg.title_path,
+        "text": text if text is not None else seg.text,
+        "segment_level": seg.segment_level,
+    }
+
+
+def _batch_char_size(batch: list[dict[str, object]]) -> int:
+    return len(json.dumps(batch, ensure_ascii=False))
+
+
+def _fit_text_to_char_budget(seg: SegmentDraft, max_batch_chars: int) -> str:
+    text = seg.text
+    if _batch_char_size([_segment_dict(seg, text=text)]) <= max_batch_chars:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        candidate = text[:mid]
+        if _batch_char_size([_segment_dict(seg, text=candidate)]) <= max_batch_chars:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo]
+
+
+def _prepare_fine_segment_dict(
+    seg: SegmentDraft, *, max_batch_chars: int
+) -> dict[str, object]:
+    text = _fit_text_to_char_budget(seg, max_batch_chars)
+    return _segment_dict(seg, text=text)
+
+
+def _split_fine_batches(
+    segments: list[SegmentDraft],
+    *,
+    max_chars: int,
+    max_segments: int,
+) -> list[list[dict[str, object]]]:
+    batches: list[list[dict[str, object]]] = []
+    current: list[dict[str, object]] = []
+    for seg in segments:
+        seg_dict = _prepare_fine_segment_dict(seg, max_batch_chars=max_chars)
+        trial = current + [seg_dict]
+        if current and (
+            _batch_char_size(trial) > max_chars or len(trial) > max_segments
+        ):
+            batches.append(current)
+            current = [seg_dict]
+        else:
+            current = trial
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _prepare_large_batches(
+    segments: list[SegmentDraft],
+    *,
+    max_text_chars: int,
+) -> list[list[dict[str, object]]]:
+    batches: list[list[dict[str, object]]] = []
+    for seg in segments:
+        text = seg.text
+        if len(text) > max_text_chars:
+            text = text[:max_text_chars]
+        batches.append([_segment_dict(seg, text=text)])
+    return batches
+
+
+def _build_enrich_batches(
+    segments: list[SegmentDraft],
+    *,
+    max_chars: int,
+    max_segments: int,
+    max_large_text_chars: int,
+) -> list[tuple[str, list[dict[str, object]]]]:
+    fine = [s for s in segments if s.segment_level == "fine"]
+    large = [s for s in segments if s.segment_level == "large"]
+    batches: list[tuple[str, list[dict[str, object]]]] = []
+    for batch in _split_fine_batches(
+        fine, max_chars=max_chars, max_segments=max_segments
+    ):
+        batches.append(("fine", batch))
+    for batch in _prepare_large_batches(large, max_text_chars=max_large_text_chars):
+        batches.append(("large", batch))
+    return batches
+
+
+def _parse_enrich_rows(payload: dict[str, object]) -> list[dict[str, object]]:
+    raw_segments = payload.get("segments_json")
+    if not isinstance(raw_segments, str):
+        raise ChunkEnrichResponseError("segments_json missing")
+    try:
+        rows = json.loads(raw_segments)
+    except json.JSONDecodeError as exc:
+        raise ChunkEnrichResponseError("segments_json invalid") from exc
+    if not isinstance(rows, list):
+        raise ChunkEnrichResponseError("segments_json invalid")
+    return [row for row in rows if isinstance(row, dict)]
+
+
 class AgentOSChunkEnricher:
     def __init__(
         self,
@@ -57,10 +162,16 @@ class AgentOSChunkEnricher:
         app_name: str = RETRIEVAL_CHUNK_ENRICHER_APP_NAME,
         client: Optional[AgentOSClient] = None,
         invoke_app: Optional[InvokeFn] = None,
+        max_batch_chars: int = config.ENRICH_BATCH_MAX_CHARS,
+        max_batch_segments: int = config.ENRICH_BATCH_MAX_SEGMENTS,
+        max_large_text_chars: int = config.ENRICH_LARGE_MAX_TEXT_CHARS,
     ) -> None:
         self.app_name = app_name
         self._client = client
         self._invoke_app = invoke_app
+        self._max_batch_chars = max_batch_chars
+        self._max_batch_segments = max_batch_segments
+        self._max_large_text_chars = max_large_text_chars
 
     async def _invoke(self, input_data: dict[str, object]) -> dict[str, object]:
         if self._invoke_app is not None:
@@ -75,41 +186,43 @@ class AgentOSChunkEnricher:
         segments: list[SegmentDraft],
         catalog: list[dict],
     ) -> list[SegmentDraft]:
-        payload = await self._invoke(
-            {
-                "task_id": task_id,
-                "catalog_json": json.dumps(catalog, ensure_ascii=False),
-                "segments_json": json.dumps(
-                    [
-                        {
-                            "chunk_id": seg.chunk_id,
-                            "title_path": seg.title_path,
-                            "text": seg.text,
-                            "segment_level": seg.segment_level,
-                        }
-                        for seg in segments
-                    ],
-                    ensure_ascii=False,
-                ),
-            }
-        )
-        raw_segments = payload.get("segments_json")
-        if not isinstance(raw_segments, str):
-            raise ChunkEnrichResponseError("segments_json missing")
-        try:
-            rows = json.loads(raw_segments)
-        except json.JSONDecodeError as exc:
-            raise ChunkEnrichResponseError("segments_json invalid") from exc
-        if not isinstance(rows, list):
-            raise ChunkEnrichResponseError("segments_json invalid")
+        if not segments:
+            return []
 
+        catalog_json = json.dumps(catalog, ensure_ascii=False)
+        batches = _build_enrich_batches(
+            segments,
+            max_chars=self._max_batch_chars,
+            max_segments=self._max_batch_segments,
+            max_large_text_chars=self._max_large_text_chars,
+        )
+        total_batches = len(batches)
         by_id: dict[str, dict[str, object]] = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            chunk_id = row.get("chunk_id")
-            if isinstance(chunk_id, str):
-                by_id[chunk_id] = row
+
+        for batch_index, (layer, batch_dicts) in enumerate(batches, start=1):
+            approx_chars = _batch_char_size(batch_dicts)
+            try:
+                payload = await self._invoke(
+                    {
+                        "task_id": task_id,
+                        "catalog_json": catalog_json,
+                        "segments_json": json.dumps(
+                            batch_dicts, ensure_ascii=False
+                        ),
+                    }
+                )
+                for row in _parse_enrich_rows(payload):
+                    chunk_id = row.get("chunk_id")
+                    if isinstance(chunk_id, str):
+                        by_id[chunk_id] = row
+            except ChunkEnrichResponseError:
+                raise
+            except Exception as exc:
+                raise ChunkEnrichResponseError(
+                    f"enrich batch {batch_index}/{total_batches} failed "
+                    f"({layer}, {len(batch_dicts)} segments, "
+                    f"~{approx_chars} chars): {exc}"
+                ) from exc
 
         alias_to_canonical = _build_alias_to_canonical(catalog)
 
