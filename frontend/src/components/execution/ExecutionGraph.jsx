@@ -36,6 +36,15 @@ export default function ExecutionGraph({ graph, selectedKey, onSelectNode }) {
       id: `${e.from}-${e.to}-${i}`,
       source: e.from,
       target: e.to,
+      animated: e.kind === 'parallel',
+      style:
+        e.kind === 'depends_on'
+          ? { stroke: '#6366f1', strokeWidth: 2 }
+          : e.kind === 'parallel'
+            ? { stroke: '#0ea5e9' }
+            : undefined,
+      label: e.kind === 'depends_on' ? '依赖' : e.kind === 'parallel' ? '并行' : undefined,
+      labelStyle: { fontSize: 10, fill: '#64748b' },
     }))
     return { nodes: layoutWithDagre(rfNodes, rfEdges), edges: rfEdges }
   }, [graph, selectedKey])

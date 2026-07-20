@@ -477,6 +477,11 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
         except BidIndexBlockedError as exc:
             await _mark_failed(task_id, str(exc), "diagnosing")
             return False
+    else:
+        tracker = get_tracker(task_id)
+        await tracker.notify("index.gate", status="skipped")
+
+    await get_tracker(task_id).register_diagnosis_categories(categories)
 
     async with database.SessionLocal() as session:
         task = await session.get(DiagnosisTask, task_id)
@@ -505,15 +510,7 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
 
         cat_id = category["id"]
         node_key = f"diagnosis.category.{cat_id}"
-        tracker = get_tracker(task_id)
-        await tracker.add_node(
-            node_key=node_key,
-            parent_key="diagnosis",
-            label=category.get("name") or cat_id,
-            kind="batch",
-            meta={"category_id": cat_id},
-        )
-        async with tracker.track_node(node_key):
+        async with get_tracker(task_id).track_node(node_key):
             offline_items, file_items = _split_items_by_diagnosis_mode(category_items)
             result_by_id: dict = {}
             for item in offline_items:

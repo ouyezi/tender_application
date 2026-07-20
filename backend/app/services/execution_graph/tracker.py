@@ -54,6 +54,30 @@ class ExecutionGraphTracker:
         except Exception as exc:
             logger.warning("init_graph failed for task %s: %s", self.task_id, exc)
 
+    async def _add_edges(
+        self,
+        session,
+        edges: list[tuple[str, str, str]],
+    ) -> None:
+        for from_key, to_key, edge_kind in edges:
+            existing_edge = await session.scalar(
+                select(ExecutionEdge).where(
+                    ExecutionEdge.task_id == self.task_id,
+                    ExecutionEdge.from_key == from_key,
+                    ExecutionEdge.to_key == to_key,
+                )
+            )
+            if existing_edge is not None:
+                continue
+            session.add(
+                ExecutionEdge(
+                    task_id=self.task_id,
+                    from_key=from_key,
+                    to_key=to_key,
+                    edge_kind=edge_kind,
+                )
+            )
+
     async def add_node(
         self,
         node_key: str,
@@ -62,6 +86,8 @@ class ExecutionGraphTracker:
         kind: str,
         meta: dict[str, Any] | None = None,
         sort_order: int = 0,
+        incoming_edges: list[tuple[str, str]] | None = None,
+        outgoing_edges: list[tuple[str, str]] | None = None,
     ) -> None:
         try:
             async with db.SessionLocal() as session:
@@ -71,33 +97,50 @@ class ExecutionGraphTracker:
                         ExecutionNode.node_key == node_key,
                     )
                 )
-                if existing is not None:
-                    return
-
-                session.add(
-                    ExecutionNode(
-                        task_id=self.task_id,
-                        node_key=node_key,
-                        parent_key=parent_key,
-                        label=label,
-                        kind=kind,
-                        meta=json.dumps(meta or {}, ensure_ascii=False),
-                        sort_order=sort_order,
-                    )
-                )
-                if parent_key:
+                if existing is None:
                     session.add(
-                        ExecutionEdge(
+                        ExecutionNode(
                             task_id=self.task_id,
-                            from_key=parent_key,
-                            to_key=node_key,
-                            edge_kind="sequential",
+                            node_key=node_key,
+                            parent_key=parent_key,
+                            label=label,
+                            kind=kind,
+                            meta=json.dumps(meta or {}, ensure_ascii=False),
+                            sort_order=sort_order,
                         )
                     )
+
+                edge_specs: list[tuple[str, str, str]] = []
+                for from_key, edge_kind in incoming_edges or []:
+                    edge_specs.append((from_key, node_key, edge_kind))
+                for to_key, edge_kind in outgoing_edges or []:
+                    edge_specs.append((node_key, to_key, edge_kind))
+                await self._add_edges(session, edge_specs)
                 await session.commit()
         except Exception as exc:
             logger.warning(
                 "add_node failed for task %s key %s: %s", self.task_id, node_key, exc
+            )
+
+    async def register_diagnosis_categories(
+        self, categories: list[dict[str, Any]]
+    ) -> None:
+        """Pre-register parallel category batch nodes after checklist is ready."""
+        for idx, category in enumerate(categories):
+            cat_id = category["id"]
+            node_key = f"diagnosis.category.{cat_id}"
+            await self.add_node(
+                node_key=node_key,
+                parent_key="diagnosis",
+                label=category.get("name") or cat_id,
+                kind="batch",
+                meta={"category_id": cat_id},
+                sort_order=110 + idx,
+                incoming_edges=[
+                    ("checklist.generate", "parallel"),
+                    ("index.gate", "depends_on"),
+                ],
+                outgoing_edges=[("report.generate", "parallel")],
             )
 
     async def notify(

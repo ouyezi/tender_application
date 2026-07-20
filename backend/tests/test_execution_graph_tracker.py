@@ -88,12 +88,66 @@ async def test_add_node_dynamic_batch(db_session):
         parent_key="diagnosis",
         label="资质审查",
         kind="batch",
+        incoming_edges=[
+            ("checklist.generate", "parallel"),
+            ("index.gate", "depends_on"),
+        ],
+        outgoing_edges=[("report.generate", "parallel")],
     )
     async with tracker.track_node("diagnosis.category.c1"):
         pass
     node = await _get_node(db_session, "T-EG-001", "diagnosis.category.c1")
     assert node.status == "completed"
     assert node.parent_key == "diagnosis"
+
+
+@pytest.mark.asyncio
+async def test_register_diagnosis_categories_creates_parallel_edges(db_session):
+    tracker = ExecutionGraphTracker("T-EG-001")
+    await tracker.init_graph()
+    await tracker.register_diagnosis_categories(
+        [
+            {"id": "cat-a", "name": "资质要求"},
+            {"id": "cat-b", "name": "信用要求"},
+        ]
+    )
+    async with db_session() as session:
+        from sqlalchemy import select
+
+        from app.models import ExecutionEdge
+
+        edges = (
+            await session.execute(
+                select(ExecutionEdge).where(ExecutionEdge.task_id == "T-EG-001")
+            )
+        ).scalars().all()
+    parallel = [
+        (e.from_key, e.to_key)
+        for e in edges
+        if e.edge_kind == "parallel"
+    ]
+    assert ("checklist.generate", "diagnosis.category.cat-a") in parallel
+    assert ("checklist.generate", "diagnosis.category.cat-b") in parallel
+    assert ("diagnosis.category.cat-a", "report.generate") in parallel
+    assert ("diagnosis.category.cat-b", "report.generate") in parallel
+    depends = [
+        (e.from_key, e.to_key)
+        for e in edges
+        if e.edge_kind == "depends_on"
+    ]
+    assert ("index.gate", "diagnosis.category.cat-a") in depends
+    assert ("index.gate", "diagnosis.category.cat-b") in depends
+
+
+@pytest.mark.asyncio
+async def test_template_wiki_precedes_gate_not_interpret(db_session):
+    from app.services.execution_graph.template import TASK_GRAPH_EDGES
+
+    edge_pairs = {(e["from_key"], e["to_key"]) for e in TASK_GRAPH_EDGES}
+    assert ("index.wiki", "index.gate") in edge_pairs
+    assert ("index.wiki", "interpret") not in edge_pairs
+    assert ("parse.bid", "index.segments") in edge_pairs
+    assert ("parse.bid", "index.gate") not in edge_pairs
 
 
 async def _all_nodes(session_factory, task_id: str):
