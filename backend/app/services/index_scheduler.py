@@ -31,6 +31,7 @@ from app.services.retrieval.persist import (
 )
 from app.services.retrieval.vectors import VectorIndex, get_embedding_model
 from app.services.retrieval.wiki import get_wiki_builder
+from app.services.execution_graph import get_tracker
 from app.services.retrieval.segments import materialize_segments
 from app.services.retrieval.table_text import merge_table_text_into_segments
 from app.services.retrieval.tags import load_tag_catalog
@@ -200,55 +201,92 @@ async def _run_job(job_id: int) -> None:
                 await session.commit()
         return
 
+    tracker = None
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is not None and task.bid_file_id == file_id:
+            tracker = get_tracker(task_id)
+
     try:
         markdown = Path(md_path).read_text(encoding="utf-8")
         tree = json.loads(Path(tree_path).read_text(encoding="utf-8"))
         fine_chunks = json.loads(Path(chunks_path).read_text(encoding="utf-8"))
-        segments = materialize_segments(markdown, tree, fine_chunks)
         table_dir = config.UPLOAD_DIR / task_id / "table" / file_id
-        segments = merge_table_text_into_segments(markdown, tree, segments, table_dir)
         text_dir = config.UPLOAD_DIR / task_id / "index_text"
 
+        if tracker is not None:
+            async with tracker.track("index.segments"):
+                segments = materialize_segments(markdown, tree, fine_chunks)
+                segments = merge_table_text_into_segments(
+                    markdown, tree, segments, table_dir
+                )
+        else:
+            segments = materialize_segments(markdown, tree, fine_chunks)
+            segments = merge_table_text_into_segments(
+                markdown, tree, segments, table_dir
+            )
+
         new_text_paths = external_text_paths(segments, text_dir)
-        async with database.SessionLocal() as session:
-            catalog = await load_tag_catalog(session)
-            segments = await get_chunk_enricher().enrich_many(
-                task_id=task_id,
-                segments=segments,
-                catalog=catalog,
-            )
-            task = await session.get(DiagnosisTask, task_id)
-            document_role = resolve_document_role(
-                file_id=file_id,
-                tender_file_id=task.tender_file_id if task else None,
-                bid_file_id=task.bid_file_id if task else None,
-            )
-            old_text_paths = await invalidate_file_index(session, task_id, file_id)
-            await write_segments(
-                session,
-                task_id,
-                file_id,
-                segments,
-                text_dir,
-                document_role=document_role,
-            )
-            await rebuild_fts_for_file(session, task_id, file_id)
-            job = await session.get(IndexJob, job_id)
-            if job is not None:
-                job.status = "partial"
-                job.stage = "fts"
-                job.progress_done = len(segments)
-                job.progress_total = len(segments)
-            await session.commit()
+
+        async def _enrich_and_persist() -> list[str]:
+            async with database.SessionLocal() as session:
+                catalog = await load_tag_catalog(session)
+                nonlocal segments
+                segments = await get_chunk_enricher().enrich_many(
+                    task_id=task_id,
+                    segments=segments,
+                    catalog=catalog,
+                )
+                task = await session.get(DiagnosisTask, task_id)
+                document_role = resolve_document_role(
+                    file_id=file_id,
+                    tender_file_id=task.tender_file_id if task else None,
+                    bid_file_id=task.bid_file_id if task else None,
+                )
+                old_text_paths = await invalidate_file_index(session, task_id, file_id)
+                await write_segments(
+                    session,
+                    task_id,
+                    file_id,
+                    segments,
+                    text_dir,
+                    document_role=document_role,
+                )
+                await rebuild_fts_for_file(session, task_id, file_id)
+                job = await session.get(IndexJob, job_id)
+                if job is not None:
+                    job.status = "partial"
+                    job.stage = "fts"
+                    job.progress_done = len(segments)
+                    job.progress_total = len(segments)
+                await session.commit()
+                return old_text_paths
+
+        if tracker is not None:
+            async with tracker.track("index.enrich"):
+                old_text_paths = await _enrich_and_persist()
+        else:
+            old_text_paths = await _enrich_and_persist()
 
         async with database.SessionLocal() as session:
-            await _rebuild_vectors_for_file(session, task_id, file_id)
-            await _rebuild_wiki_for_task(session, task_id)
-            job = await session.get(IndexJob, job_id)
-            if job is not None:
-                job.status = "ready"
-                job.stage = "wiki"
-                job.finished_at = utcnow()
+            if tracker is not None:
+                async with tracker.track("index.vectors"):
+                    await _rebuild_vectors_for_file(session, task_id, file_id)
+                async with tracker.track("index.wiki"):
+                    await _rebuild_wiki_for_task(session, task_id)
+                    job = await session.get(IndexJob, job_id)
+                    if job is not None:
+                        job.status = "ready"
+                        job.stage = "wiki"
+                        job.finished_at = utcnow()
+            else:
+                await _rebuild_vectors_for_file(session, task_id, file_id)
+                await _rebuild_wiki_for_task(session, task_id)
+                job = await session.get(IndexJob, job_id)
+                if job is not None:
+                    job.status = "ready"
+                    job.stage = "wiki"
+                    job.finished_at = utcnow()
             await session.commit()
         purge_orphaned_text_files(old_text_paths, new_text_paths)
     except Exception as exc:
