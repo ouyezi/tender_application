@@ -33,6 +33,7 @@ from app.services.checklist_service import (
     wait_for_tender_parse_ready,
 )
 from app.services.checklist_context import ChecklistInputError
+from app.services.execution_graph import get_tracker
 from app.services.tender_content import TenderContentProvider, TenderContentStopped
 
 
@@ -273,6 +274,7 @@ async def pause_task(task_id: str) -> DiagnosisTask:
         paused = task
 
     _get_control(task_id).pause_event.clear()
+    await get_tracker(task_id).notify("diagnosis", meta={"paused": True})
     return paused
 
 
@@ -501,71 +503,82 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
             await _mark_stopped(task_id)
             return False
 
-        offline_items, file_items = _split_items_by_diagnosis_mode(category_items)
-        result_by_id: dict = {}
-        for item in offline_items:
-            result_by_id[item["id"]] = _offline_batch_result(item)
+        cat_id = category["id"]
+        node_key = f"diagnosis.category.{cat_id}"
+        tracker = get_tracker(task_id)
+        await tracker.add_node(
+            node_key=node_key,
+            parent_key="diagnosis",
+            label=category.get("name") or cat_id,
+            kind="batch",
+            meta={"category_id": cat_id},
+        )
+        async with tracker.track_node(node_key):
+            offline_items, file_items = _split_items_by_diagnosis_mode(category_items)
+            result_by_id: dict = {}
+            for item in offline_items:
+                result_by_id[item["id"]] = _offline_batch_result(item)
 
-        if file_items:
-            try:
-                retrieved_chunks = await retrieval.retrieve_for_category(
-                    task_id=task_id,
-                    category=category,
-                    items=file_items,
-                )
-                batch_results = await engine.diagnose_category(
-                    task_id=task_id,
-                    category=category,
-                    items=file_items,
-                    retrieved_chunks=retrieved_chunks,
-                )
-                assert_batch_complete(file_items, batch_results)
-            except (
-                AgentOSConfigError,
-                AgentOSError,
-                BatchDiagnosisResponseError,
-                ValueError,
-            ) as exc:
-                await _mark_failed(task_id, str(exc)[:240], "diagnosing")
-                return False
-            for batch_result in batch_results:
-                result_by_id[batch_result.checklist_item_id] = batch_result
-
-        ordered_pairs = [
-            (item, result_by_id[item["id"]]) for item in category_items
-        ]
-
-        async with database.SessionLocal() as session:
-            task = await session.get(DiagnosisTask, task_id)
-            if task is None:
-                return False
-            if task.status in TERMINAL_STATUSES:
-                return False
-
-            for item, batch_result in ordered_pairs:
-                session.add(
-                    DiagnosisResult(
+            if file_items:
+                try:
+                    retrieved_chunks = await retrieval.retrieve_for_category(
                         task_id=task_id,
-                        checklist_item_id=batch_result.checklist_item_id,
-                        content_title=item["title"],
-                        description=batch_result.description
-                        or item.get("requirement", ""),
-                        result=batch_result.compliance,
-                        compliance_status=batch_result.compliance,
-                        consequence_tags=json.dumps(
-                            batch_result.consequence_tags,
-                            ensure_ascii=False,
-                        ),
-                        evidence=batch_result.evidence,
-                        suggestion=batch_result.suggestion,
-                        sort_order=sort_order,
+                        category=category,
+                        items=file_items,
                     )
-                )
-                sort_order += 1
+                    batch_results = await engine.diagnose_category(
+                        task_id=task_id,
+                        category=category,
+                        items=file_items,
+                        retrieved_chunks=retrieved_chunks,
+                    )
+                    assert_batch_complete(file_items, batch_results)
+                except (
+                    AgentOSConfigError,
+                    AgentOSError,
+                    BatchDiagnosisResponseError,
+                    ValueError,
+                ) as exc:
+                    await _mark_failed(task_id, str(exc)[:240], "diagnosing")
+                    return False
+                for batch_result in batch_results:
+                    result_by_id[batch_result.checklist_item_id] = batch_result
 
-            task.progress_done = sort_order
-            task.updated_at = utcnow()
-            await session.commit()
+            ordered_pairs = [
+                (item, result_by_id[item["id"]]) for item in category_items
+            ]
+
+            async with database.SessionLocal() as session:
+                task = await session.get(DiagnosisTask, task_id)
+                if task is None:
+                    return False
+                if task.status in TERMINAL_STATUSES:
+                    return False
+
+                for item, batch_result in ordered_pairs:
+                    session.add(
+                        DiagnosisResult(
+                            task_id=task_id,
+                            checklist_item_id=batch_result.checklist_item_id,
+                            content_title=item["title"],
+                            description=batch_result.description
+                            or item.get("requirement", ""),
+                            result=batch_result.compliance,
+                            compliance_status=batch_result.compliance,
+                            consequence_tags=json.dumps(
+                                batch_result.consequence_tags,
+                                ensure_ascii=False,
+                            ),
+                            evidence=batch_result.evidence,
+                            suggestion=batch_result.suggestion,
+                            sort_order=sort_order,
+                        )
+                    )
+                    sort_order += 1
+
+                task.progress_done = sort_order
+                task.updated_at = utcnow()
+                await session.commit()
 
         if _should_stop(task_id):
             await _mark_stopped(task_id)
@@ -596,7 +609,8 @@ async def _complete_from_diagnosis(task_id: str) -> None:
         await _mark_stopped(task_id)
         return
 
-    md_path, docx_path = await report.generate_and_save_reports(task_id)
+    async with get_tracker(task_id).track("report.generate"):
+        md_path, docx_path = await report.generate_and_save_reports(task_id)
 
     async with database.SessionLocal() as session:
         task = await session.get(DiagnosisTask, task_id)
@@ -614,10 +628,24 @@ async def _complete_from_diagnosis(task_id: str) -> None:
         task.updated_at = utcnow()
         await session.commit()
 
+    if not _should_stop(task_id):
+        tracker = get_tracker(task_id)
+        await tracker.notify("start", status="completed")
+        await tracker.notify("end", status="completed")
+
 
 async def _run(task_id: str) -> None:
     ctrl = _get_control(task_id)
     try:
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None:
+                return
+            if task.status in TERMINAL_STATUSES:
+                return
+
+        await get_tracker(task_id).notify("start", status="running")
+
         async with database.SessionLocal() as session:
             task = await session.get(DiagnosisTask, task_id)
             if task is None:
@@ -666,12 +694,13 @@ async def _run(task_id: str) -> None:
                     return
 
                 agent = _build_interpretation_agent()
-                interpret_result = await agent.interpret(
-                    task_id=task_id,
-                    tender_text=tender_text,
-                    background=background,
-                    requirements=requirements,
-                )
+                async with get_tracker(task_id).track("interpret"):
+                    interpret_result = await agent.interpret(
+                        task_id=task_id,
+                        tender_text=tender_text,
+                        background=background,
+                        requirements=requirements,
+                    )
             except Exception as exc:
                 await _mark_failed(task_id, str(exc)[:240], "interpreting")
                 return
@@ -726,9 +755,10 @@ async def _run(task_id: str) -> None:
                 return
 
             try:
-                await ChecklistService(agent=AgentOSChecklistAgent()).generate_for_task(
-                    task_id
-                )
+                async with get_tracker(task_id).track("checklist.generate"):
+                    await ChecklistService(
+                        agent=AgentOSChecklistAgent()
+                    ).generate_for_task(task_id)
             except (
                 ChecklistValidationError,
                 ChecklistInputError,
