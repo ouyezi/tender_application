@@ -11,6 +11,12 @@ from app.services.retrieval.document_role import resolve_document_role
 from app.services.retrieval.persist import load_chunk_text
 
 
+def get_context_resolver():
+    from app.services.retrieval.context_resolver_agent_os import AgentOSContextResolver
+
+    return AgentOSContextResolver()
+
+
 def _parse_json_list(raw: str | None) -> list:
     if not raw:
         return []
@@ -295,44 +301,38 @@ async def resolve_context(
         sibling_chunk_ids: list[str]
         used_fallback = False
 
-        if resolver is not None:
-            payload = {
-                "requirement": requirement,
-                "query": query,
-                "hits": [
-                    {
-                        "chunk_id": hit.chunk_id,
-                        "title": chunk_by_id[hit.chunk_id].title,
-                        "summary": chunk_by_id[hit.chunk_id].summary,
-                        "title_path": _parse_json_list(chunk_by_id[hit.chunk_id].title_path),
-                    }
-                    for hit in group_hits
-                    if hit.chunk_id in chunk_by_id
-                ],
-                "parent": {
-                    "chunk_id": large.chunk_id,
-                    "title": large.title,
-                    "summary": large.summary,
-                    "title_path": _parse_json_list(large.title_path),
-                    "intro_chars": (intro_end - large.start) if intro_end and intro_end > large.start else 0,
-                    "total_chars": parent_body_chars,
-                },
-                "siblings": window_siblings,
-                "candidates": candidates,
-            }
-            try:
-                decision = await resolver.resolve_group(payload, candidates)
-                actions = list(decision.get("actions") or [])
-                sibling_chunk_ids = list(decision.get("sibling_chunk_ids") or [])
-            except Exception:
-                used_fallback = True
-                actions, sibling_chunk_ids = _fallback_actions(
-                    candidates=candidates,
-                    intro_end=intro_end,
-                    large_start=large.start,
-                    window_siblings=window_siblings,
-                )
-        else:
+        if resolver is None:
+            resolver = get_context_resolver()
+
+        payload = {
+            "requirement": requirement,
+            "query": query,
+            "hits": [
+                {
+                    "chunk_id": hit.chunk_id,
+                    "title": chunk_by_id[hit.chunk_id].title,
+                    "summary": chunk_by_id[hit.chunk_id].summary,
+                    "title_path": _parse_json_list(chunk_by_id[hit.chunk_id].title_path),
+                }
+                for hit in group_hits
+                if hit.chunk_id in chunk_by_id
+            ],
+            "parent": {
+                "chunk_id": large.chunk_id,
+                "title": large.title,
+                "summary": large.summary,
+                "title_path": _parse_json_list(large.title_path),
+                "intro_chars": (intro_end - large.start) if intro_end and intro_end > large.start else 0,
+                "total_chars": parent_body_chars,
+            },
+            "siblings": window_siblings,
+            "candidates": candidates,
+        }
+        try:
+            decision = await resolver.resolve_group(payload, candidates)
+            actions = list(decision.get("actions") or [])
+            sibling_chunk_ids = list(decision.get("sibling_chunk_ids") or [])
+        except Exception:
             used_fallback = True
             actions, sibling_chunk_ids = _fallback_actions(
                 candidates=candidates,
