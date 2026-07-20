@@ -140,14 +140,38 @@ async def test_register_diagnosis_categories_creates_parallel_edges(db_session):
 
 
 @pytest.mark.asyncio
-async def test_template_wiki_precedes_gate_not_interpret(db_session):
-    from app.services.execution_graph.template import TASK_GRAPH_EDGES
+async def test_template_bid_retrieval_container_and_children(db_session):
+    from app.services.execution_graph.template import TASK_GRAPH_EDGES, TASK_GRAPH_NODES
+
+    nodes_by_key = {n["node_key"]: n for n in TASK_GRAPH_NODES}
+    assert "bid.retrieval" in nodes_by_key
+    assert nodes_by_key["bid.retrieval"]["kind"] == "container"
+
+    child_keys = [
+        "parse.bid",
+        "index.segments",
+        "index.enrich",
+        "index.fts",
+        "index.vectors",
+        "index.wiki",
+        "index.gate",
+    ]
+    for key in child_keys:
+        assert nodes_by_key[key]["parent_key"] == "bid.retrieval"
 
     edge_pairs = {(e["from_key"], e["to_key"]) for e in TASK_GRAPH_EDGES}
-    assert ("index.wiki", "index.gate") in edge_pairs
-    assert ("index.wiki", "interpret") not in edge_pairs
-    assert ("parse.bid", "index.segments") in edge_pairs
-    assert ("parse.bid", "index.gate") not in edge_pairs
+    assert ("start", "bid.retrieval") in edge_pairs
+    assert ("start", "parse.bid") not in edge_pairs
+    assert ("parse.bid", "index.segments") not in edge_pairs
+    assert ("index.wiki", "index.gate") not in edge_pairs
+
+
+@pytest.mark.asyncio
+async def test_init_graph_sets_bid_retrieval_parent_keys(db_session):
+    tracker = ExecutionGraphTracker("T-EG-001")
+    await tracker.init_graph()
+    bid = await _get_node(db_session, "T-EG-001", "parse.bid")
+    assert bid.parent_key == "bid.retrieval"
 
 
 async def _all_nodes(session_factory, task_id: str):
