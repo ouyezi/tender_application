@@ -144,12 +144,15 @@ def _build_enrich_batches(
 
 def _parse_enrich_rows(payload: dict[str, object]) -> list[dict[str, object]]:
     raw_segments = payload.get("segments_json")
-    if not isinstance(raw_segments, str):
+    if isinstance(raw_segments, str):
+        try:
+            rows = json.loads(raw_segments)
+        except json.JSONDecodeError as exc:
+            raise ChunkEnrichResponseError("segments_json invalid") from exc
+    elif isinstance(raw_segments, list):
+        rows = raw_segments
+    else:
         raise ChunkEnrichResponseError("segments_json missing")
-    try:
-        rows = json.loads(raw_segments)
-    except json.JSONDecodeError as exc:
-        raise ChunkEnrichResponseError("segments_json invalid") from exc
     if not isinstance(rows, list):
         raise ChunkEnrichResponseError("segments_json invalid")
     return [row for row in rows if isinstance(row, dict)]

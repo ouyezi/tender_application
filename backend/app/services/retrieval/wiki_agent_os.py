@@ -110,12 +110,15 @@ class AgentOSWikiBuilder:
         )
 
         raw_pages = payload.get("pages_json")
-        if not isinstance(raw_pages, str):
+        if isinstance(raw_pages, str):
+            try:
+                rows = json.loads(raw_pages)
+            except json.JSONDecodeError as exc:
+                raise WikiBuilderResponseError("pages_json invalid") from exc
+        elif isinstance(raw_pages, list):
+            rows = raw_pages
+        else:
             raise WikiBuilderResponseError("pages_json missing")
-        try:
-            rows = json.loads(raw_pages)
-        except json.JSONDecodeError as exc:
-            raise WikiBuilderResponseError("pages_json invalid") from exc
         if not isinstance(rows, list):
             raise WikiBuilderResponseError("pages_json invalid")
 

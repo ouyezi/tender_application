@@ -195,6 +195,31 @@ async def test_enrich_large_one_per_batch_with_truncation():
 
 
 @pytest.mark.asyncio
+async def test_enrich_accepts_structured_output_list():
+    async def fake_invoke(app_name, input_data):
+        del app_name, input_data
+        return {
+            "segments_json": [
+                {
+                    "chunk_id": "c1",
+                    "title": "授权",
+                    "summary": "摘要",
+                    "description": "描述",
+                    "tags": [{"name": "授权证书", "confidence": 0.9}],
+                }
+            ]
+        }
+
+    catalog = [{"name": "授权证书", "aliases": []}]
+    enricher = AgentOSChunkEnricher(invoke_app=fake_invoke)
+    out = await enricher.enrich_many(
+        task_id="T1", segments=[_seg("c1")], catalog=catalog
+    )
+    assert out[0].title == "授权"
+    assert out[0].tags == [{"name": "授权证书", "confidence": 0.9}]
+
+
+@pytest.mark.asyncio
 async def test_enrich_mixed_fine_and_large():
     calls: list[tuple[str, list[str]]] = []
 
