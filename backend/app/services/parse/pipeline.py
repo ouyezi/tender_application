@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services import artifact
+from app.services.execution_graph import get_tracker
 from app.services.parse import chunk as chunk_mod
 from app.services.parse import convert as convert_mod
 from app.services.parse import extract as extract_mod
@@ -41,7 +42,13 @@ def _result(
     }
 
 
-async def run_parse_pipeline(file_id: str, task_id: str, stored_path: str) -> dict[str, Any]:
+async def run_parse_pipeline(
+    file_id: str,
+    task_id: str,
+    stored_path: str,
+    *,
+    graph_node_key: str | None = None,
+) -> dict[str, Any]:
     """Run the full parse pipeline for one file, writing all artifacts to disk.
 
     Returns ``{"status": "succeeded"|"partial"|"failed", "md_path", "tree_path",
@@ -51,6 +58,11 @@ async def run_parse_pipeline(file_id: str, task_id: str, stored_path: str) -> di
     (with a ``no_headings`` warning).
     """
     warnings: list[str] = []
+
+    async def _notify_stage(stage: str) -> None:
+        if graph_node_key:
+            await get_tracker(task_id).notify(graph_node_key, meta={"parse_stage": stage})
+
     root = artifact.ensure_artifact_dirs(task_id)
 
     src_path = Path(stored_path)
@@ -72,6 +84,7 @@ async def run_parse_pipeline(file_id: str, task_id: str, stored_path: str) -> di
     json_dir.mkdir(parents=True, exist_ok=True)
 
     # --- convert ---------------------------------------------------------
+    await _notify_stage("convert")
     try:
         if ext == ".docx":
             markdown = await asyncio.to_thread(convert_mod.convert_docx_to_markdown, src_path, image_dir)
@@ -88,6 +101,7 @@ async def run_parse_pipeline(file_id: str, task_id: str, stored_path: str) -> di
         return _result("failed", error=f"convert_failed: {exc}")
 
     # --- extract (tables; image links normalized after) -------------------
+    await _notify_stage("extract")
     table_warnings: list[str] = []
     try:
         if ext == ".docx":
@@ -107,6 +121,7 @@ async def run_parse_pipeline(file_id: str, task_id: str, stored_path: str) -> di
     await asyncio.to_thread(md_path.write_text, markdown, encoding="utf-8")
 
     # --- build_tree --------------------------------------------------------
+    await _notify_stage("build_tree")
     try:
         tree = await asyncio.to_thread(build_document_tree, markdown)
     except Exception as exc:
@@ -118,6 +133,7 @@ async def run_parse_pipeline(file_id: str, task_id: str, stored_path: str) -> di
     )
 
     # --- chunk ---------------------------------------------------------------
+    await _notify_stage("chunk")
     try:
         chunks = await asyncio.to_thread(chunk_mod.chunk_from_tree, markdown, tree)
     except Exception as exc:
@@ -130,6 +146,7 @@ async def run_parse_pipeline(file_id: str, task_id: str, stored_path: str) -> di
     )
 
     # --- write meta ------------------------------------------------------
+    await _notify_stage("write_index")
     status = "partial" if table_warnings else "succeeded"
     meta = {
         "file_id": file_id,

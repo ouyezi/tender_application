@@ -142,7 +142,7 @@ async def test_kick_wiring_with_monkeypatched_pipeline(tmp_path, monkeypatch, cl
 
     await _create_file_and_job(task_id, file_id, str(tmp_path / "unused.docx"))
 
-    async def _fake_pipeline(file_id_arg, task_id_arg, stored_path_arg):
+    async def _fake_pipeline(file_id_arg, task_id_arg, stored_path_arg, **kwargs):
         assert file_id_arg == file_id
         assert task_id_arg == task_id
         return {

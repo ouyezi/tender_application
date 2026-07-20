@@ -16,8 +16,9 @@ from typing import Optional
 from sqlalchemy import select
 
 from app import db as database
-from app.models import ParseJob, WorkspaceFile, utcnow
+from app.models import DiagnosisTask, ParseJob, WorkspaceFile, utcnow
 from app.services import workspace
+from app.services.execution_graph import get_tracker
 from app.services.parse.pipeline import run_parse_pipeline
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,15 @@ def _get_wake() -> asyncio.Event:
     if _wake is None:
         _wake = asyncio.Event()
     return _wake
+
+
+async def _parse_node_key(session, task_id: str, file_id: str) -> str:
+    task = await session.get(DiagnosisTask, task_id)
+    if task and task.tender_file_id == file_id:
+        return "parse.tender"
+    if task and task.bid_file_id == file_id:
+        return "parse.bid"
+    return f"parse.{file_id}"
 
 
 def _stage_for_error(error: Optional[str]) -> str:
@@ -133,12 +143,17 @@ async def _run_job(job_id: int) -> None:
             await session.commit()
             return
         stored_path = wf.stored_path
+        node_key = await _parse_node_key(session, task_id, file_id)
         wf.parse_status = "running"
         wf.updated_at = utcnow()
         await session.commit()
 
     try:
-        result = await run_parse_pipeline(file_id, task_id, stored_path)
+        tracker = get_tracker(task_id)
+        async with tracker.track(node_key):
+            result = await run_parse_pipeline(
+                file_id, task_id, stored_path, graph_node_key=node_key
+            )
     except Exception as exc:
         async with database.SessionLocal() as session:
             job = await session.get(ParseJob, job_id)
