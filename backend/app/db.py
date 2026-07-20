@@ -1,9 +1,10 @@
 from collections.abc import AsyncGenerator
 import json
 
-from sqlalchemy import inspect, text, update
+from sqlalchemy import event, inspect, text, update
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateColumn, CreateIndex
 
 from app.config import DATABASE_URL
@@ -21,8 +22,30 @@ from app.models import (
 )
 from app.services.retrieval.fts import create_fts_table_sql
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+# SQLite allows only one writer; background schedulers + API requests contend on
+# the same file. WAL + busy_timeout + NullPool reduce "database is locked" errors.
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+_IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+_engine_kwargs: dict = {"echo": False}
+if _IS_SQLITE:
+    _engine_kwargs["poolclass"] = NullPool
+    _engine_kwargs["connect_args"] = {"timeout": SQLITE_BUSY_TIMEOUT_MS / 1000}
+
+engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+if _IS_SQLITE:
+    event.listens_for(engine.sync_engine, "connect")(_configure_sqlite_connection)
 
 DEFAULT_KNOWLEDGE_TAGS = [
     ("授权证书", ["授权书", "授权函"], "投标授权类材料"),

@@ -1,6 +1,7 @@
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app import models
 from app.db import recover_interrupted_tasks
@@ -11,6 +12,40 @@ from app.models import (
     DiagnosisResult,
     DiagnosisTask,
 )
+
+
+@pytest.mark.asyncio
+async def test_sqlite_engine_uses_wal_and_busy_timeout(tmp_path):
+    db_path = tmp_path / "test.db"
+    url = f"sqlite+aiosqlite:///{db_path}"
+    engine = create_async_engine(
+        url,
+        echo=False,
+        poolclass=NullPool,
+        connect_args={"timeout": 30},
+    )
+
+    from sqlalchemy import event as sa_event
+
+    def _configure(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    sa_event.listens_for(engine.sync_engine, "connect")(_configure)
+
+    async with engine.connect() as conn:
+        journal_mode = (await conn.execute(text("PRAGMA journal_mode"))).scalar_one()
+        busy_timeout = (await conn.execute(text("PRAGMA busy_timeout"))).scalar_one()
+        foreign_keys = (await conn.execute(text("PRAGMA foreign_keys"))).scalar_one()
+
+    assert journal_mode == "wal"
+    assert busy_timeout == 30000
+    assert foreign_keys == 1
+
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
