@@ -2315,6 +2315,95 @@ a:hover {
   }
 }
 
+.process-subflow-block {
+  margin-top: 1rem;
+}
+
+.process-subflow-block h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.process-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.process-step-item {
+  position: relative;
+}
+
+.process-step-button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  text-align: left;
+  padding: 0.65rem 0.5rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+.process-step-button:hover {
+  background: #f8fafc;
+}
+
+.process-step-button.is-selected {
+  background: #f1f5f9;
+}
+
+.process-step-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--node-pending);
+}
+
+.process-step-dot.node-status-running {
+  background: var(--node-running);
+}
+
+.process-step-dot.node-status-completed {
+  background: var(--node-completed);
+}
+
+.process-step-dot.node-status-failed {
+  background: var(--node-failed);
+}
+
+.process-step-dot.node-status-interrupted {
+  background: var(--node-interrupted);
+}
+
+.process-step-dot.node-status-skipped {
+  background: var(--node-skipped);
+}
+
+.process-step-label {
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.process-step-duration {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.process-step-connector {
+  display: block;
+  width: 2px;
+  height: 12px;
+  background: #cbd5e1;
+  margin-left: 0.65rem;
+}
+
 @media (max-width: 900px) {
   .process-layout {
     grid-template-columns: 1fr;
