@@ -74,6 +74,9 @@ def _chunk_to_hit(
     text: str | None = None,
     tender_file_id: str | None = None,
     bid_file_id: str | None = None,
+    context_role: str = "matched",
+    derived_from: str | None = None,
+    anchor_chunk_id: str | None = None,
 ) -> RetrievalHit:
     return RetrievalHit(
         chunk_id=chunk.chunk_id,
@@ -92,6 +95,9 @@ def _chunk_to_hit(
             bid_file_id=bid_file_id,
             stored_role=chunk.document_role,
         ),
+        context_role=context_role,
+        derived_from=derived_from,
+        anchor_chunk_id=anchor_chunk_id,
     )
 
 

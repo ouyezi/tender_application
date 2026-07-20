@@ -112,6 +112,9 @@ class RetrievalHit:
     child_chunk_ids: list[str] = field(default_factory=list)
     score: float = 0.0
     document_role: str = ""
+    context_role: str = "matched"
+    derived_from: str | None = None
+    anchor_chunk_id: str | None = None
 
 
 @dataclass
