@@ -63,6 +63,11 @@ def materialize_segments(
             continue
         start = int(node["start_offset"])
         end = int(node.get("subtree_end") or node["end_offset"])
+        intro_end: int | None = None
+        if children:
+            first_child_start = int(children[0]["start_offset"])
+            if first_child_start > start:
+                intro_end = first_child_start
         # rebuild title path
         cur = node
         parts = [cur["title"]]
@@ -84,6 +89,7 @@ def materialize_segments(
                 title_path=title_path,
                 start=start,
                 end=end,
+                intro_end=intro_end,
                 text=markdown[start:end],
                 child_chunk_ids=child_ids,
                 title=node.get("title") or "",

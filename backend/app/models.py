@@ -228,6 +228,7 @@ class KnowledgeChunk(Base):
     title_path: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     end: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    intro_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     text_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     text_inline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     child_chunk_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
