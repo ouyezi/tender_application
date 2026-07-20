@@ -260,3 +260,32 @@ async def test_load_chunk_text_inline_and_external(db_session, tmp_path, monkeyp
     assert by_id["inline_1"].text_inline == inline_text
     assert by_id["external_1"].text_path is not None
     assert Path(by_id["external_1"].text_path).is_file()
+
+
+@pytest.mark.asyncio
+async def test_bid_index_tracks_fts_as_separate_node(
+    db_session, sample_parsed_workspace_file
+):
+    from app.models import ExecutionNode
+    from app.services.execution_graph import get_tracker
+
+    task = await db_session.get(
+        DiagnosisTask, sample_parsed_workspace_file.task_id
+    )
+    task.bid_file_id = sample_parsed_workspace_file.id
+    await db_session.commit()
+
+    await get_tracker(task.id).init_graph()
+
+    await index_scheduler.enqueue(task.id, sample_parsed_workspace_file.id)
+    await index_scheduler.drain_once_for_tests()
+
+    fts = (
+        await db_session.execute(
+            select(ExecutionNode).where(
+                ExecutionNode.task_id == task.id,
+                ExecutionNode.node_key == "index.fts",
+            )
+        )
+    ).scalar_one()
+    assert fts.status == "completed"

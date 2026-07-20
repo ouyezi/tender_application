@@ -228,7 +228,7 @@ async def _run_job(job_id: int) -> None:
 
         new_text_paths = external_text_paths(segments, text_dir)
 
-        async def _enrich_and_persist() -> list[str]:
+        async def _enrich_and_persist(*, rebuild_fts: bool = True) -> list[str]:
             async with database.SessionLocal() as session:
                 catalog = await load_tag_catalog(session)
                 nonlocal segments
@@ -252,11 +252,12 @@ async def _run_job(job_id: int) -> None:
                     text_dir,
                     document_role=document_role,
                 )
-                await rebuild_fts_for_file(session, task_id, file_id)
+                if rebuild_fts:
+                    await rebuild_fts_for_file(session, task_id, file_id)
                 job = await session.get(IndexJob, job_id)
                 if job is not None:
                     job.status = "partial"
-                    job.stage = "fts"
+                    job.stage = "fts" if rebuild_fts else "enrich"
                     job.progress_done = len(segments)
                     job.progress_total = len(segments)
                 await session.commit()
@@ -264,9 +265,17 @@ async def _run_job(job_id: int) -> None:
 
         if tracker is not None:
             async with tracker.track("index.enrich"):
-                old_text_paths = await _enrich_and_persist()
+                old_text_paths = await _enrich_and_persist(rebuild_fts=False)
+            async with database.SessionLocal() as session:
+                async with tracker.track("index.fts"):
+                    await rebuild_fts_for_file(session, task_id, file_id)
+                    job = await session.get(IndexJob, job_id)
+                    if job is not None:
+                        job.status = "partial"
+                        job.stage = "fts"
+                    await session.commit()
         else:
-            old_text_paths = await _enrich_and_persist()
+            old_text_paths = await _enrich_and_persist(rebuild_fts=True)
 
         async with database.SessionLocal() as session:
             if tracker is not None:
