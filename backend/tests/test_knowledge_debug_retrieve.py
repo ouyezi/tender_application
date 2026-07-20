@@ -147,7 +147,9 @@ async def test_debug_precise_search_includes_trace(db_session, indexed_semantic_
     assert result.trace.post_rerank_order
     assert result.trace.ai_rerank["used"] is True
     assert "scores_or_ranks" in result.trace.ai_rerank
-    assert all(item.segment_level == "large" for item in result.items)
+    assert result.trace.context_resolutions
+    roles = {item.context_role for item in result.items}
+    assert "matched" in roles
 
 
 @pytest.mark.asyncio

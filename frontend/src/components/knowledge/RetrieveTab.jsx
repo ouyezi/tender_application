@@ -348,21 +348,24 @@ export default function RetrieveTab({ taskId }) {
                 <tr>
                   <th>score</th>
                   <th>level</th>
+                  <th>context_role</th>
                   <th>title</th>
                   <th>path</th>
+                  <th>derived_from</th>
+                  <th>anchor_chunk_id</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="empty-state-hint">
+                    <td colSpan={8} className="empty-state-hint">
                       无命中
                     </td>
                   </tr>
                 ) : (
                   items.map((item) => (
-                    <tr key={item.chunk_id}>
+                    <tr key={`${item.chunk_id}-${item.context_role || 'matched'}`}>
                       <td>{item.score != null ? Number(item.score).toFixed(4) : '—'}</td>
                       <td>
                         <span
@@ -371,9 +374,20 @@ export default function RetrieveTab({ taskId }) {
                           {item.segment_level || '—'}
                         </span>
                       </td>
+                      <td>{item.context_role || 'matched'}</td>
                       <td title={item.title}>{item.title || '—'}</td>
                       <td title={(item.title_path || []).join(' / ')}>
                         {pathTail(item.title_path)}
+                      </td>
+                      <td>
+                        {item.derived_from ? <code>{item.derived_from}</code> : '—'}
+                      </td>
+                      <td>
+                        {item.anchor_chunk_id ? (
+                          <code>{item.anchor_chunk_id}</code>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td>
                         <button
@@ -481,6 +495,30 @@ export default function RetrieveTab({ taskId }) {
               <details className="retrieve-details">
                 <summary>AI ranks / degraded_reason / rationale</summary>
                 <JsonBlock value={trace.ai_rerank || {}} />
+              </details>
+
+              <details className="retrieve-details">
+                <summary>context_resolutions</summary>
+                {(trace.context_resolutions || []).length === 0 ? (
+                  <p className="empty-state-hint">无</p>
+                ) : (
+                  <table className="admin-table retrieve-mini-table">
+                    <thead>
+                      <tr>
+                        <th>context_role</th>
+                        <th>count</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(trace.context_resolutions || []).map((row) => (
+                        <tr key={row.context_role}>
+                          <td>{row.context_role || '—'}</td>
+                          <td>{row.count ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </details>
 
               <details className="retrieve-details">
