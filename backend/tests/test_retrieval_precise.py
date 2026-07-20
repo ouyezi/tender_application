@@ -143,10 +143,12 @@ async def test_precise_search_merges_channels_and_reranks(
     assert result.error is None
     assert result.items
     assert result.items[0].title
+    matched = [h for h in result.items if h.context_role == "matched"]
+    assert matched
     assert any(
-        "退款" in hit.text or "无理由" in hit.text for hit in result.items
+        "退款" in hit.text or "无理由" in hit.text for hit in matched
     )
-    assert all(hit.segment_level == "large" for hit in result.items)
+    assert matched[0].segment_level == "fine"
 
 
 @pytest.mark.asyncio

@@ -37,3 +37,19 @@ def test_expand_parent_hit_returns_large_not_title_only():
     assert len(expanded) == 1
     assert expanded[0].segment_level == "large"
     assert "架构正文甲" in expanded[0].text
+
+
+def test_materialize_large_sets_intro_end_to_first_child_start():
+    md = (FIXTURES / "retrieval_sample.md").read_text(encoding="utf-8")
+    tree = build_document_tree(md)
+    fine_src = chunk_from_tree(md, tree, max_chars=4000)
+    segments = materialize_segments(md, tree, fine_src)
+
+    tech = next(
+        s for s in segments
+        if s.segment_level == "large" and "技术方案" in s.title_path
+    )
+    assert tech.intro_end is not None
+    assert tech.intro_end > tech.start
+    assert md[tech.start : tech.intro_end] in tech.text
+    assert "架构正文甲" not in md[tech.start : tech.intro_end]

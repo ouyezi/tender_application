@@ -11,8 +11,10 @@ from app.engine.base import RetrievalHit
 from app.models import KnowledgeChunk
 from app.services.retrieval.debug_types import DebugRetrievalResult, DebugTrace
 from app.services.retrieval.fts import search_fts
+from app.services.retrieval.context_resolver import get_context_resolver, resolve_context
 from app.services.retrieval.provider import (
     _chunk_to_hit,
+    _load_markdown_by_file,
     _merge_channel_scores,
     _search_vector_channel,
     _task_file_ids,
@@ -48,6 +50,17 @@ def _parse_json_list(raw: str | None) -> list:
     except json.JSONDecodeError:
         return []
     return data if isinstance(data, list) else []
+
+
+def _context_resolution_summary(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for hit in hits:
+        role = hit.context_role or "matched"
+        counts[role] = counts.get(role, 0) + 1
+    return [
+        {"context_role": role, "count": count}
+        for role, count in sorted(counts.items())
+    ]
 
 
 def _rewrite_trace(
@@ -373,67 +386,47 @@ async def _debug_precise_search(
             ]
             ai_rerank_info["rationale"] = None
 
-    fine_chunks = [
-        chunk_by_id[hit.chunk_id]
-        for hit in candidate_hits
-        if hit.chunk_id in chunk_by_id
-        and chunk_by_id[hit.chunk_id].segment_level == "fine"
-    ]
     all_chunks_result = await session.execute(
         select(KnowledgeChunk).where(KnowledgeChunk.task_id == task_id)
     )
     all_chunks = all_chunks_result.scalars().all()
-    large_by_node = {
-        chunk.node_id: chunk
-        for chunk in all_chunks
-        if chunk.segment_level == "large"
-    }
+    all_chunk_by_id = {chunk.chunk_id: chunk for chunk in all_chunks}
 
-    fine_to_expanded: dict[str, KnowledgeChunk] = {}
+    file_ids = {hit.file_id for hit in candidate_hits}
+    markdown_by_file = await _load_markdown_by_file(session, task_id, file_ids)
+
+    final_hits, resolver_degraded = await resolve_context(
+        query=query or fts_query,
+        requirement=query or fts_query,
+        matched_hits=candidate_hits,
+        chunk_by_id=all_chunk_by_id,
+        all_chunks=all_chunks,
+        markdown_by_file=markdown_by_file,
+        resolver=get_context_resolver(),
+        tender_file_id=tender_file_id,
+        bid_file_id=bid_file_id,
+    )
+    if resolver_degraded:
+        degraded = True
+
+    score_by_id = {hit.chunk_id: hit.score for hit in candidate_hits}
+    for hit in final_hits:
+        if hit.score == 0.0 and hit.chunk_id in score_by_id:
+            hit.score = score_by_id[hit.chunk_id]
+
+    context_resolutions = _context_resolution_summary(final_hits)
+
     expansions: list[dict[str, str]] = []
-    for fine in fine_chunks:
-        expanded: KnowledgeChunk | None = None
-        reason = "no_large_ancestor"
-        for anc_id in _parse_json_list(fine.ancestor_node_ids):
-            large = large_by_node.get(anc_id)
-            if large is not None:
-                expanded = large
-                reason = "ancestor_large"
-                break
-        if expanded is None:
-            large = large_by_node.get(fine.node_id)
-            if large is not None:
-                expanded = large
-                reason = "same_node_large"
-        target = expanded or fine
-        fine_to_expanded[fine.chunk_id] = target
-        if target.chunk_id != fine.chunk_id:
-            expansions.append(
-                {
-                    "from_fine_id": fine.chunk_id,
-                    "to_large_id": target.chunk_id,
-                    "reason": reason,
-                }
-            )
-
-    final_hits: list[RetrievalHit] = []
-    seen: set[str] = set()
-    for hit in candidate_hits:
-        chunk = chunk_by_id.get(hit.chunk_id)
-        if chunk is None:
+    for hit in final_hits:
+        if not hit.derived_from:
             continue
-        if chunk.segment_level == "fine":
-            chunk = fine_to_expanded.get(chunk.chunk_id, chunk)
-        if chunk.chunk_id in seen:
-            continue
-        seen.add(chunk.chunk_id)
-        final_hit = _chunk_to_hit(
-            chunk,
-            tender_file_id=tender_file_id,
-            bid_file_id=bid_file_id,
+        expansions.append(
+            {
+                "from_fine_id": hit.anchor_chunk_id or "",
+                "to_large_id": hit.derived_from,
+                "reason": hit.context_role,
+            }
         )
-        final_hit.score = hit.score
-        final_hits.append(final_hit)
 
     return DebugRetrievalResult(
         mode="precise_search",
@@ -442,7 +435,7 @@ async def _debug_precise_search(
         incomplete=incomplete,
         degraded=degraded,
         error=rewrite_error,
-        path_note="precise_search: rewrite → three-channel recall → merge → rerank → expand",
+        path_note="precise_search: rewrite → three-channel recall → merge → rerank → context_resolver",
         trace=DebugTrace(
             rewrite=_rewrite_trace(
                 vector_query=vector_query,
@@ -457,5 +450,6 @@ async def _debug_precise_search(
             post_rerank_order=post_rerank_order,
             ai_rerank=ai_rerank_info,
             expansions=expansions,
+            context_resolutions=context_resolutions,
         ),
     )

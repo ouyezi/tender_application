@@ -15,6 +15,7 @@ class DebugTrace:
     post_rerank_order: list[str] = field(default_factory=list)
     ai_rerank: dict[str, Any] = field(default_factory=dict)
     expansions: list[dict[str, str]] = field(default_factory=list)
+    context_resolutions: list[dict[str, Any]] = field(default_factory=list)
     skipped_stages: list[str] = field(default_factory=list)
 
 
@@ -44,6 +45,9 @@ class DebugRetrievalResult:
                 "child_chunk_ids": h.child_chunk_ids,
                 "score": h.score,
                 "document_role": h.document_role,
+                "context_role": h.context_role,
+                "derived_from": h.derived_from,
+                "anchor_chunk_id": h.anchor_chunk_id,
             }
 
         return {

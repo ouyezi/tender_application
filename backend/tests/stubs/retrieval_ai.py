@@ -169,6 +169,13 @@ class StubAiReranker:
         return [hit.chunk_id for hit in ordered]
 
 
+class StubContextResolver:
+    async def resolve_group(self, payload, candidates):
+        actions = [a for a in candidates if a in ("add_parent_intro", "add_siblings")]
+        sibling_ids = [s["chunk_id"] for s in payload.get("siblings", [])]
+        return {"actions": actions or ["keep_only"], "sibling_chunk_ids": sibling_ids[:1]}
+
+
 def apply_retrieval_ai_stubs(monkeypatch) -> None:
     """Patch factories so index/retrieve tests never call real Agent OS."""
     monkeypatch.setattr(
@@ -210,4 +217,13 @@ def apply_retrieval_ai_stubs(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.retrieval.debug.get_ai_reranker",
         lambda: StubAiReranker(),
+    )
+    stub_resolver = StubContextResolver()
+    monkeypatch.setattr(
+        "app.services.retrieval.context_resolver.get_context_resolver",
+        lambda: stub_resolver,
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval.provider.get_context_resolver",
+        lambda: stub_resolver,
     )

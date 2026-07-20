@@ -40,3 +40,6 @@ EMBEDDING_MODEL_PATH = ""  # local path; empty → hash-embedding fallback for t
 EMBEDDING_DIM = 384
 OCR_ENABLED = True
 OCR_MIN_CHARS_PER_PAGE = 40
+RETRIEVAL_PARENT_MAX_CHARS = 10_000
+RETRIEVAL_SIBLING_WINDOW = 2
+RETRIEVAL_CONTEXT_RESOLVER_APP_NAME = "retrieval_context_resolver_app"

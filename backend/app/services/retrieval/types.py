@@ -21,6 +21,7 @@ class SegmentDraft:
     start: int
     end: int
     text: str
+    intro_end: int | None = None
     child_chunk_ids: list[str] = field(default_factory=list)
     source: ChunkSource = "native_text"
     title: str = ""

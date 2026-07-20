@@ -123,6 +123,8 @@ Diagnosis
 
 ### 4.3 父章节命中规则（已确认）
 
+> **注（2026-07-20）：** `precise_search` / `collection` 的 fine→large 展开行为已由 `2026-07-20-retrieval-parent-context-resolver-design.md` 替代。
+
 命中父章节（标题、概要、标签或 Wiki 指向该节点）时：
 
 - **默认展开为覆盖子树的 `large` 段返回**；

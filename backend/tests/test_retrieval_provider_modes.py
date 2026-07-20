@@ -49,6 +49,7 @@ async def db_session(tmp_path, monkeypatch):
     upload_dir = tmp_path / "uploads"
     monkeypatch.setattr("app.config.UPLOAD_DIR", upload_dir)
     monkeypatch.setattr("app.services.artifact.UPLOAD_DIR", upload_dir)
+    monkeypatch.setattr("app.services.retrieval.provider.UPLOAD_DIR", upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     apply_retrieval_ai_stubs(monkeypatch)
 
@@ -187,6 +188,29 @@ async def indexed_bid_task(db_session):
     return task_id
 
 
+@pytest_asyncio.fixture
+async def indexed_qualification_task(db_session):
+    task_id = "T-CTX"
+    bid_id = "fqual001"
+    wf = await _write_parsed_file(
+        db_session,
+        task_id=task_id,
+        file_id=bid_id,
+        label="投标文件",
+        md_text="",
+        md_fixture=FIXTURES / "retrieval_qualification.md",
+    )
+    task = (
+        await db_session.execute(
+            select(DiagnosisTask).where(DiagnosisTask.id == task_id)
+        )
+    ).scalar_one()
+    task.bid_file_id = bid_id
+    await db_session.commit()
+    await _index_file(wf)
+    return task_id
+
+
 @pytest.mark.asyncio
 async def test_full_document_returns_markdown(provider, indexed_task_with_tender):
     result = await provider.retrieve(
@@ -252,6 +276,29 @@ async def test_precise_search_returns_results(provider, indexed_bid_task):
 
 
 @pytest.mark.asyncio
+async def test_precise_search_context_resolver_supplements_sibling(
+    provider, indexed_qualification_task
+):
+    result = await provider.retrieve(
+        task_id=indexed_qualification_task,
+        content_source="precise_search",
+        content_target={"query": "独立法人 授权"},
+    )
+    assert result.mode == "precise_search"
+    assert result.error is None
+    roles = {h.context_role for h in result.items}
+    assert "matched" in roles
+    assert "parent_intro" in roles or "sibling" in roles
+    assert not (
+        len(result.items) == 1
+        and result.items[0].segment_level == "large"
+        and "子公司" in result.items[0].text
+        and "授权" in result.items[0].text
+        and result.items[0].context_role == "matched"
+    )
+
+
+@pytest.mark.asyncio
 async def test_expand_fine_to_large_picks_nearest_ancestor(db_session):
     """3-level tree: fine leaf expands to nearest parent large, not root."""
     md_text = (
@@ -306,8 +353,8 @@ async def test_expand_fine_to_large_picks_nearest_ancestor(db_session):
 
 
 @pytest.mark.asyncio
-async def test_collection_expands_to_nearest_large_not_root(provider, db_session):
-    """Collection on 3-level doc returns nearest large for tagged leaf, not root."""
+async def test_collection_uses_context_resolver_not_full_large(provider, db_session):
+    """Collection keeps fine matched hits and supplements context via resolver."""
     task_id = "T-RETR-NEAR"
     file_id = "fnear001"
     md_text = (
@@ -332,16 +379,11 @@ async def test_collection_expands_to_nearest_large_not_root(provider, db_session
             select(KnowledgeChunk).where(KnowledgeChunk.file_id == file_id)
         )
     ).scalars().all()
-    larges = {c.title: c for c in chunks if c.segment_level == "large"}
-    root_large = larges["文档总述"]
-    nearest_large = larges["技术方案"]
+    root_large = next(c for c in chunks if c.segment_level == "large" and c.title == "文档总述")
 
-    # Only tag the deepest fine chunk so expansion path is exercised.
     for chunk in chunks:
         if chunk.segment_level == "fine" and chunk.title == "架构设计":
             chunk.tags = json.dumps([{"name": "技术方案", "confidence": 0.9}])
-        elif chunk.segment_level == "large":
-            chunk.tags = json.dumps([])
         else:
             chunk.tags = json.dumps([])
     await db_session.commit()
@@ -352,13 +394,18 @@ async def test_collection_expands_to_nearest_large_not_root(provider, db_session
         content_target={"target_tags": ["技术方案"]},
     )
     assert result.error is None
-    assert len(result.items) == 1
-    hit = result.items[0]
-    assert hit.chunk_id == nearest_large.chunk_id
-    assert hit.chunk_id != root_large.chunk_id
-    assert hit.title == "技术方案"
-    assert "架构正文甲" in hit.text
-    assert "总述段落。" not in hit.text
+    matched = [h for h in result.items if h.context_role == "matched"]
+    assert len(matched) == 1
+    assert matched[0].segment_level == "fine"
+    assert matched[0].title == "架构设计"
+    assert "架构正文甲" in matched[0].text
+    assert not any(
+        h.segment_level == "large"
+        and h.context_role == "matched"
+        and h.chunk_id == root_large.chunk_id
+        for h in result.items
+    )
+    assert "总述段落。" not in " ".join(h.text for h in matched)
 
 
 @pytest.mark.asyncio

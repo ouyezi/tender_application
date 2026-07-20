@@ -31,6 +31,8 @@ export default function ChunkDetailDrawer({
           nodeId ? `&node_id=${encodeURIComponent(nodeId)}` : ''
         }`
       : null
+  const hasContextMeta =
+    chunk?.context_role || chunk?.derived_from || chunk?.anchor_chunk_id
 
   return (
     <div className="chunk-drawer-backdrop" onClick={onClose} role="presentation">
@@ -70,6 +72,27 @@ export default function ChunkDetailDrawer({
                   ID：<code>{chunk.chunk_id}</code>
                 </span>
               </div>
+
+              {hasContextMeta && (
+                <section className="chunk-drawer-section">
+                  <h3>上下文解析</h3>
+                  <div className="chunk-drawer-meta">
+                    <span>
+                      context_role：<strong>{chunk.context_role || 'matched'}</strong>
+                    </span>
+                    {chunk.derived_from ? (
+                      <span>
+                        derived_from：<code>{chunk.derived_from}</code>
+                      </span>
+                    ) : null}
+                    {chunk.anchor_chunk_id ? (
+                      <span>
+                        anchor_chunk_id：<code>{chunk.anchor_chunk_id}</code>
+                      </span>
+                    ) : null}
+                  </div>
+                </section>
+              )}
 
               <section className="chunk-drawer-section">
                 <h3>标题路径</h3>

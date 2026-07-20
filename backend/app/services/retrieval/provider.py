@@ -18,6 +18,7 @@ from app.config import (
 )
 from app.engine.base import RetrievalHit, RetrievalResult
 from app.models import DiagnosisTask, IndexJob, KnowledgeChunk, WorkspaceFile
+from app.services.retrieval.context_resolver import get_context_resolver, resolve_context
 from app.services.retrieval.document_role import resolve_document_role
 from app.services.retrieval.fts import search_fts
 from app.services.retrieval.persist import load_chunk_text
@@ -74,6 +75,9 @@ def _chunk_to_hit(
     text: str | None = None,
     tender_file_id: str | None = None,
     bid_file_id: str | None = None,
+    context_role: str = "matched",
+    derived_from: str | None = None,
+    anchor_chunk_id: str | None = None,
 ) -> RetrievalHit:
     return RetrievalHit(
         chunk_id=chunk.chunk_id,
@@ -92,6 +96,9 @@ def _chunk_to_hit(
             bid_file_id=bid_file_id,
             stored_role=chunk.document_role,
         ),
+        context_role=context_role,
+        derived_from=derived_from,
+        anchor_chunk_id=anchor_chunk_id,
     )
 
 
@@ -183,13 +190,29 @@ async def _full_document(
     )
 
 
+async def _load_markdown_by_file(
+    session: AsyncSession,
+    task_id: str,
+    file_ids: set[str] | None = None,
+) -> dict[str, str]:
+    query = select(WorkspaceFile).where(WorkspaceFile.task_id == task_id)
+    if file_ids:
+        query = query.where(WorkspaceFile.id.in_(file_ids))
+    result = await session.execute(query)
+    markdown_by_file: dict[str, str] = {}
+    for wf in result.scalars().all():
+        if wf.md_path:
+            markdown_by_file[wf.id] = Path(wf.md_path).read_text(encoding="utf-8")
+    return markdown_by_file
+
+
 async def _expand_fine_to_large(
     session: AsyncSession,
     task_id: str,
     fine_chunks: list[KnowledgeChunk],
     large_by_node: dict[str, KnowledgeChunk],
 ) -> list[KnowledgeChunk]:
-    """Replace fine hits with ancestor large segments when available."""
+    """Replace fine hits with ancestor large segments when available (deprecated)."""
     out: list[KnowledgeChunk] = []
     seen: set[str] = set()
 
@@ -385,60 +408,38 @@ async def _precise_search(
         key=lambda hit: (order.get(hit.chunk_id, len(order)), -hit.score)
     )
 
-    fine_chunks = [
-        chunk_by_id[hit.chunk_id]
-        for hit in candidate_hits
-        if hit.chunk_id in chunk_by_id
-        and chunk_by_id[hit.chunk_id].segment_level == "fine"
-    ]
     all_chunks_result = await session.execute(
         select(KnowledgeChunk).where(KnowledgeChunk.task_id == task_id)
     )
     all_chunks = all_chunks_result.scalars().all()
-    large_by_node = {
-        chunk.node_id: chunk
-        for chunk in all_chunks
-        if chunk.segment_level == "large"
-    }
+    chunk_by_id = {chunk.chunk_id: chunk for chunk in all_chunks}
 
-    fine_to_expanded: dict[str, KnowledgeChunk] = {}
-    for fine in fine_chunks:
-        expanded: KnowledgeChunk | None = None
-        for anc_id in _parse_json_list(fine.ancestor_node_ids):
-            large = large_by_node.get(anc_id)
-            if large is not None:
-                expanded = large
-                break
-        if expanded is None:
-            large = large_by_node.get(fine.node_id)
-            if large is not None:
-                expanded = large
-        fine_to_expanded[fine.chunk_id] = expanded or fine
+    file_ids = {hit.file_id for hit in candidate_hits}
+    markdown_by_file = await _load_markdown_by_file(session, task_id, file_ids)
 
-    final_hits: list[RetrievalHit] = []
-    seen: set[str] = set()
-    for hit in candidate_hits:
-        chunk = chunk_by_id.get(hit.chunk_id)
-        if chunk is None:
-            continue
-        if chunk.segment_level == "fine":
-            chunk = fine_to_expanded.get(chunk.chunk_id, chunk)
-        if chunk.chunk_id in seen:
-            continue
-        seen.add(chunk.chunk_id)
-        final_hit = _chunk_to_hit(
-            chunk,
-            tender_file_id=tender_file_id,
-            bid_file_id=bid_file_id,
-        )
-        final_hit.score = hit.score
-        final_hits.append(final_hit)
+    final_hits, resolver_degraded = await resolve_context(
+        query=query or fts_query,
+        requirement=query or fts_query,
+        matched_hits=candidate_hits,
+        chunk_by_id=chunk_by_id,
+        all_chunks=all_chunks,
+        markdown_by_file=markdown_by_file,
+        resolver=get_context_resolver(),
+        tender_file_id=tender_file_id,
+        bid_file_id=bid_file_id,
+    )
+
+    score_by_id = {hit.chunk_id: hit.score for hit in candidate_hits}
+    for hit in final_hits:
+        if hit.score == 0.0 and hit.chunk_id in score_by_id:
+            hit.score = score_by_id[hit.chunk_id]
 
     return RetrievalResult(
         mode="precise_search",
         items=final_hits,
         index_status=index_status,
         incomplete=incomplete,
+        degraded=resolver_degraded,
     )
 
 
@@ -485,36 +486,37 @@ async def _collection(
         and _chunk_matches_tags(c, target_set, INDEX_TAG_MIN_CONFIDENCE)
     ]
 
-    large_by_node = {
-        c.node_id: c for c in all_chunks if c.segment_level == "large"
-    }
-
-    fine_matched = [c for c in matched if c.segment_level == "fine"]
-    large_matched = [c for c in matched if c.segment_level == "large"]
-
-    expanded_fines = await _expand_fine_to_large(
-        session, task_id, fine_matched, large_by_node
-    )
-
-    hits: list[RetrievalHit] = []
-    seen: set[str] = set()
-    for chunk in large_matched + expanded_fines:
-        if chunk.chunk_id in seen:
-            continue
-        seen.add(chunk.chunk_id)
-        hits.append(
-            _chunk_to_hit(
-                chunk,
-                tender_file_id=tender_file_id,
-                bid_file_id=bid_file_id,
-            )
+    matched_hits = [
+        _chunk_to_hit(
+            chunk,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
         )
+        for chunk in matched
+    ]
+
+    file_ids = {chunk.file_id for chunk in matched}
+    markdown_by_file = await _load_markdown_by_file(session, task_id, file_ids)
+    query = " ".join(target_tags)
+
+    final_hits, resolver_degraded = await resolve_context(
+        query=query,
+        requirement=query,
+        matched_hits=matched_hits,
+        chunk_by_id={chunk.chunk_id: chunk for chunk in all_chunks},
+        all_chunks=all_chunks,
+        markdown_by_file=markdown_by_file,
+        resolver=get_context_resolver(),
+        tender_file_id=tender_file_id,
+        bid_file_id=bid_file_id,
+    )
 
     return RetrievalResult(
         mode="collection",
-        items=hits,
+        items=final_hits,
         index_status=index_status,
         incomplete=incomplete,
+        degraded=resolver_degraded,
     )
 
 
