@@ -7,7 +7,15 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import IndexJob, KnowledgeChunk, KnowledgeTag, WikiPage, WorkspaceFile
+from app.models import (
+    DiagnosisTask,
+    IndexJob,
+    KnowledgeChunk,
+    KnowledgeTag,
+    WikiPage,
+    WorkspaceFile,
+)
+from app.services.retrieval.document_role import resolve_document_role
 from app.services.retrieval.fts import search_fts
 from app.services.retrieval.persist import load_chunk_text
 from app.services.retrieval.provider import _task_index_status
@@ -47,10 +55,42 @@ def _chunk_matches_node(chunk: KnowledgeChunk, node_id: str) -> bool:
     return node_id in _parse_json_list(chunk.ancestor_node_ids)
 
 
-def _chunk_to_list_item(chunk: KnowledgeChunk) -> dict[str, Any]:
+async def _chunk_display_context(
+    session: AsyncSession,
+    task_id: str,
+    chunks: list[KnowledgeChunk],
+) -> tuple[str | None, str | None, dict[str, str]]:
+    task = await session.get(DiagnosisTask, task_id)
+    tender_file_id = task.tender_file_id if task else None
+    bid_file_id = task.bid_file_id if task else None
+    file_ids = {chunk.file_id for chunk in chunks}
+    file_labels: dict[str, str] = {}
+    if file_ids:
+        result = await session.execute(
+            select(WorkspaceFile).where(WorkspaceFile.id.in_(file_ids))
+        )
+        for wf in result.scalars().all():
+            file_labels[wf.id] = wf.label
+    return tender_file_id, bid_file_id, file_labels
+
+
+def _chunk_to_list_item(
+    chunk: KnowledgeChunk,
+    *,
+    tender_file_id: str | None,
+    bid_file_id: str | None,
+    file_labels: dict[str, str],
+) -> dict[str, Any]:
     return {
         "chunk_id": chunk.chunk_id,
         "file_id": chunk.file_id,
+        "document_role": resolve_document_role(
+            file_id=chunk.file_id,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+            stored_role=chunk.document_role,
+        ),
+        "file_label": file_labels.get(chunk.file_id, ""),
         "node_id": chunk.node_id,
         "parent_node_id": chunk.parent_node_id,
         "segment_level": chunk.segment_level,
@@ -68,13 +108,24 @@ def _chunk_to_list_item(chunk: KnowledgeChunk) -> dict[str, Any]:
     }
 
 
-def _chunk_to_detail(chunk: KnowledgeChunk) -> dict[str, Any]:
+def _chunk_to_detail(
+    chunk: KnowledgeChunk,
+    *,
+    tender_file_id: str | None,
+    bid_file_id: str | None,
+    file_labels: dict[str, str],
+) -> dict[str, Any]:
     text = load_chunk_text(chunk)
     truncated = False
     if len(text) > TEXT_PREVIEW_LIMIT:
         text = text[:TEXT_PREVIEW_LIMIT]
         truncated = True
-    item = _chunk_to_list_item(chunk)
+    item = _chunk_to_list_item(
+        chunk,
+        tender_file_id=tender_file_id,
+        bid_file_id=bid_file_id,
+        file_labels=file_labels,
+    )
     item["text"] = text
     item["text_truncated"] = truncated
     item["ancestor_node_ids"] = _parse_json_list(chunk.ancestor_node_ids)
@@ -156,7 +207,18 @@ async def list_chunks(
     total = len(chunks)
     start = (page - 1) * page_size
     page_chunks = chunks[start : start + page_size]
-    items = [_chunk_to_list_item(c) for c in page_chunks]
+    tender_file_id, bid_file_id, file_labels = await _chunk_display_context(
+        session, task_id, page_chunks
+    )
+    items = [
+        _chunk_to_list_item(
+            c,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+            file_labels=file_labels,
+        )
+        for c in page_chunks
+    ]
 
     return {
         "items": items,
@@ -182,7 +244,15 @@ async def get_chunk(
     chunk = result.scalar_one_or_none()
     if chunk is None:
         return None
-    return _chunk_to_detail(chunk)
+    tender_file_id, bid_file_id, file_labels = await _chunk_display_context(
+        session, task_id, [chunk]
+    )
+    return _chunk_to_detail(
+        chunk,
+        tender_file_id=tender_file_id,
+        bid_file_id=bid_file_id,
+        file_labels=file_labels,
+    )
 
 
 async def list_tags(session: AsyncSession) -> list[dict[str, Any]]:

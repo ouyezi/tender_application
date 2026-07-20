@@ -82,6 +82,8 @@ async def write_segments(
     file_id: str,
     segments: list[SegmentDraft],
     text_dir: Path,
+    *,
+    document_role: str,
 ) -> None:
     """Persist materialized segments as ``KnowledgeChunk`` rows."""
     text_dir.mkdir(parents=True, exist_ok=True)
@@ -117,6 +119,7 @@ async def write_segments(
                 text_inline=text_inline,
                 child_chunk_ids=json.dumps(seg.child_chunk_ids, ensure_ascii=False),
                 source=seg.source,
+                document_role=document_role,
                 index_status="ready",
             )
         )

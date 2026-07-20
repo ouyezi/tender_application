@@ -18,7 +18,8 @@ from sqlalchemy import select
 
 from app import config
 from app import db as database
-from app.models import IndexJob, KnowledgeChunk, WorkspaceFile, utcnow
+from app.models import IndexJob, KnowledgeChunk, WorkspaceFile, DiagnosisTask, utcnow
+from app.services.retrieval.document_role import resolve_document_role
 from app.services.retrieval.enricher import get_chunk_enricher
 from app.services.retrieval.fts import rebuild_fts_for_file
 from app.services.retrieval.persist import (
@@ -216,8 +217,21 @@ async def _run_job(job_id: int) -> None:
                 segments=segments,
                 catalog=catalog,
             )
+            task = await session.get(DiagnosisTask, task_id)
+            document_role = resolve_document_role(
+                file_id=file_id,
+                tender_file_id=task.tender_file_id if task else None,
+                bid_file_id=task.bid_file_id if task else None,
+            )
             old_text_paths = await invalidate_file_index(session, task_id, file_id)
-            await write_segments(session, task_id, file_id, segments, text_dir)
+            await write_segments(
+                session,
+                task_id,
+                file_id,
+                segments,
+                text_dir,
+                document_role=document_role,
+            )
             await rebuild_fts_for_file(session, task_id, file_id)
             job = await session.get(IndexJob, job_id)
             if job is not None:

@@ -89,10 +89,19 @@ async def test_diagnose_category_invokes_app():
                 "expected_evidence": "营业执照扫描件",
             }
         ],
-        retrieved_chunks=[RetrievedChunk(chunk_id="ch1", text="执照复印件", location="p1")],
+        retrieved_chunks=[
+            RetrievedChunk(
+                chunk_id="ch1",
+                text="执照复印件",
+                location="p1",
+                document_role="bid",
+            )
+        ],
     )
     assert calls[0][0] == "tender_batch_diagnosis_app"
     assert "system_instructions" in calls[0][1]
     assert "category_payload" in calls[0][1]
     assert "retrieved_chunks" in calls[0][1]
+    chunks_json = calls[0][1]["retrieved_chunks"]
+    assert '"document_role": "bid"' in chunks_json
     assert results[0].compliance == "insufficient_evidence"

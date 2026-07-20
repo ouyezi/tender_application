@@ -69,6 +69,7 @@ class WorkspaceRetrievalProvider:
                         chunk_id=hit.chunk_id,
                         text=hit.text,
                         location="/".join(hit.title_path),
+                        document_role=hit.document_role,
                     )
                 )
 

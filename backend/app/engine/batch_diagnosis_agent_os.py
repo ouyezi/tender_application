@@ -97,6 +97,7 @@ class AgentOSBatchDiagnosisEngine:
                 "chunk_id": c.chunk_id,
                 "text": c.text,
                 "location": c.location,
+                "document_role": c.document_role,
             }
             for c in retrieved_chunks
         ]

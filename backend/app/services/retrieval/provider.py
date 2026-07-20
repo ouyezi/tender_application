@@ -18,6 +18,7 @@ from app.config import (
 )
 from app.engine.base import RetrievalHit, RetrievalResult
 from app.models import DiagnosisTask, IndexJob, KnowledgeChunk, WorkspaceFile
+from app.services.retrieval.document_role import resolve_document_role
 from app.services.retrieval.fts import search_fts
 from app.services.retrieval.persist import load_chunk_text
 from app.services.retrieval.rerank import get_ai_reranker
@@ -58,7 +59,22 @@ def _parse_json_list(raw: str | None) -> list:
     return data if isinstance(data, list) else []
 
 
-def _chunk_to_hit(chunk: KnowledgeChunk, *, text: str | None = None) -> RetrievalHit:
+async def _task_file_ids(
+    session: AsyncSession, task_id: str
+) -> tuple[str | None, str | None]:
+    task = await session.get(DiagnosisTask, task_id)
+    if task is None:
+        return None, None
+    return task.tender_file_id, task.bid_file_id
+
+
+def _chunk_to_hit(
+    chunk: KnowledgeChunk,
+    *,
+    text: str | None = None,
+    tender_file_id: str | None = None,
+    bid_file_id: str | None = None,
+) -> RetrievalHit:
     return RetrievalHit(
         chunk_id=chunk.chunk_id,
         file_id=chunk.file_id,
@@ -70,6 +86,12 @@ def _chunk_to_hit(chunk: KnowledgeChunk, *, text: str | None = None) -> Retrieva
         tags=_parse_json_list(chunk.tags),
         text=text if text is not None else load_chunk_text(chunk),
         child_chunk_ids=_parse_json_list(chunk.child_chunk_ids),
+        document_role=resolve_document_role(
+            file_id=chunk.file_id,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+            stored_role=chunk.document_role,
+        ),
     )
 
 
@@ -136,6 +158,7 @@ async def _full_document(
         )
 
     text = Path(wf.md_path).read_text(encoding="utf-8")
+    tender_file_id, bid_file_id = await _task_file_ids(session, task_id)
     hit = RetrievalHit(
         chunk_id=f"full:{wf.id}",
         file_id=wf.id,
@@ -146,6 +169,11 @@ async def _full_document(
         title_path=[wf.label or wf.original_filename],
         tags=[],
         text=text,
+        document_role=resolve_document_role(
+            file_id=wf.id,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+        ),
     )
     return RetrievalResult(
         mode="full_document",
@@ -289,6 +317,8 @@ async def _precise_search(
             error="missing query",
         )
 
+    tender_file_id, bid_file_id = await _task_file_ids(session, task_id)
+
     rewrite = await get_query_rewriter().rewrite(query, hints)
 
     vector_query = str(rewrite.get("vector_query") or query)
@@ -335,7 +365,11 @@ async def _precise_search(
         chunk = chunk_by_id.get(chunk_id)
         if chunk is None:
             continue
-        hit = _chunk_to_hit(chunk)
+        hit = _chunk_to_hit(
+            chunk,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+        )
         hit.score = merged_scores[chunk_id]
         candidate_hits.append(hit)
 
@@ -392,7 +426,11 @@ async def _precise_search(
         if chunk.chunk_id in seen:
             continue
         seen.add(chunk.chunk_id)
-        final_hit = _chunk_to_hit(chunk)
+        final_hit = _chunk_to_hit(
+            chunk,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+        )
         final_hit.score = hit.score
         final_hits.append(final_hit)
 
@@ -434,6 +472,7 @@ async def _collection(
         )
 
     target_set = set(target_tags)
+    tender_file_id, bid_file_id = await _task_file_ids(session, task_id)
     result = await session.execute(
         select(KnowledgeChunk).where(KnowledgeChunk.task_id == task_id)
     )
@@ -463,7 +502,13 @@ async def _collection(
         if chunk.chunk_id in seen:
             continue
         seen.add(chunk.chunk_id)
-        hits.append(_chunk_to_hit(chunk))
+        hits.append(
+            _chunk_to_hit(
+                chunk,
+                tender_file_id=tender_file_id,
+                bid_file_id=bid_file_id,
+            )
+        )
 
     return RetrievalResult(
         mode="collection",
@@ -512,7 +557,15 @@ async def _large_segments(
         ]
 
     chunks.sort(key=lambda c: (c.start, c.chunk_id))
-    hits = [_chunk_to_hit(c) for c in chunks]
+    tender_file_id, bid_file_id = await _task_file_ids(session, task_id)
+    hits = [
+        _chunk_to_hit(
+            c,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+        )
+        for c in chunks
+    ]
     return RetrievalResult(
         mode="large_segments",
         items=hits,

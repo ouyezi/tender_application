@@ -43,6 +43,7 @@ class DebugRetrievalResult:
                 "text": h.text,
                 "child_chunk_ids": h.child_chunk_ids,
                 "score": h.score,
+                "document_role": h.document_role,
             }
 
         return {

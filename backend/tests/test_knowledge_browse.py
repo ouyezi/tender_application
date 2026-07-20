@@ -134,6 +134,8 @@ async def test_list_chunks_filters_segment_level(db_session, indexed_semantic_ta
     assert page["total"] >= 1
     assert all(c["segment_level"] == "fine" for c in page["items"])
     assert "title" in page["items"][0]
+    assert "document_role" in page["items"][0]
+    assert "file_label" in page["items"][0]
     assert "search_degraded" in page
 
 

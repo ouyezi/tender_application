@@ -386,6 +386,7 @@ async def test_retrieve_for_category_dedupes_by_chunk_id(
     assert len(chunk_ids) == len(set(chunk_ids))
     assert chunks
     assert all(c.location for c in chunks)
+    assert all(c.document_role for c in chunks)
 
 
 @pytest.mark.asyncio

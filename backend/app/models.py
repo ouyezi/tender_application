@@ -231,6 +231,7 @@ class KnowledgeChunk(Base):
     text_inline: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     child_chunk_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="native_text")
+    document_role: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     index_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     embedding_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

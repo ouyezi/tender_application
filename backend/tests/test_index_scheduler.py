@@ -72,6 +72,7 @@ async def sample_parsed_workspace_file(db_session, tmp_path, monkeypatch):
             bid_filename="bid.docx",
             bid_path="/tmp/bid.docx",
             config_snapshot="[]",
+            tender_file_id=file_id,
         )
     )
 
@@ -146,6 +147,7 @@ async def test_index_job_writes_fine_and_large(db_session, sample_parsed_workspa
         any(tag.get("name") == "技术方案" for tag in json.loads(c.tags or "[]"))
         for c in chunks
     ), "expected controlled tag from catalog matching sample content"
+    assert all(c.document_role == "tender" for c in chunks)
 
 
 @pytest.mark.asyncio
@@ -241,7 +243,9 @@ async def test_load_chunk_text_inline_and_external(db_session, tmp_path, monkeyp
         ),
     ]
 
-    await write_segments(db_session, task_id, file_id, segments, text_dir)
+    await write_segments(
+        db_session, task_id, file_id, segments, text_dir, document_role="other"
+    )
     await db_session.commit()
 
     chunks = (

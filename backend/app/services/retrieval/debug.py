@@ -15,6 +15,7 @@ from app.services.retrieval.provider import (
     _chunk_to_hit,
     _merge_channel_scores,
     _search_vector_channel,
+    _task_file_ids,
     _task_index_status,
     retrieve as provider_retrieve,
 )
@@ -320,12 +321,18 @@ async def _debug_precise_search(
     )
     chunk_by_id = {chunk.chunk_id: chunk for chunk in chunk_result.scalars().all()}
 
+    tender_file_id, bid_file_id = await _task_file_ids(session, task_id)
+
     candidate_hits: list[RetrievalHit] = []
     for chunk_id in ranked_ids:
         chunk = chunk_by_id.get(chunk_id)
         if chunk is None:
             continue
-        hit = _chunk_to_hit(chunk)
+        hit = _chunk_to_hit(
+            chunk,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+        )
         hit.score = merged_scores[chunk_id]
         candidate_hits.append(hit)
 
@@ -420,7 +427,11 @@ async def _debug_precise_search(
         if chunk.chunk_id in seen:
             continue
         seen.add(chunk.chunk_id)
-        final_hit = _chunk_to_hit(chunk)
+        final_hit = _chunk_to_hit(
+            chunk,
+            tender_file_id=tender_file_id,
+            bid_file_id=bid_file_id,
+        )
         final_hit.score = hit.score
         final_hits.append(final_hit)
 

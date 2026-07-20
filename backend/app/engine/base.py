@@ -95,6 +95,7 @@ class RetrievedChunk:
     chunk_id: str
     text: str
     location: str = ""
+    document_role: str = ""
 
 
 @dataclass
@@ -110,6 +111,7 @@ class RetrievalHit:
     text: str = ""
     child_chunk_ids: list[str] = field(default_factory=list)
     score: float = 0.0
+    document_role: str = ""
 
 
 @dataclass
