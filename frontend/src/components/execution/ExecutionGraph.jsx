@@ -19,9 +19,9 @@ function layoutWithDagre(nodes, edges) {
   })
 }
 
-export default function ExecutionGraph({ graph, selectedKey, onSelectNode }) {
-  const { nodes, edges } = useMemo(() => {
-    const rfNodes = graph.nodes.map((n) => ({
+export default function ExecutionGraph({ nodes, edges, selectedKey, onSelectNode }) {
+  const { rfNodes, rfEdges } = useMemo(() => {
+    const mappedNodes = nodes.map((n) => ({
       id: n.key,
       type: 'execution',
       data: {
@@ -32,7 +32,7 @@ export default function ExecutionGraph({ graph, selectedKey, onSelectNode }) {
       },
       position: { x: 0, y: 0 },
     }))
-    const rfEdges = graph.edges.map((e, i) => ({
+    const mappedEdges = edges.map((e, i) => ({
       id: `${e.from}-${e.to}-${i}`,
       source: e.from,
       target: e.to,
@@ -46,14 +46,17 @@ export default function ExecutionGraph({ graph, selectedKey, onSelectNode }) {
       label: e.kind === 'depends_on' ? '依赖' : e.kind === 'parallel' ? '并行' : undefined,
       labelStyle: { fontSize: 10, fill: '#64748b' },
     }))
-    return { nodes: layoutWithDagre(rfNodes, rfEdges), edges: rfEdges }
-  }, [graph, selectedKey])
+    return {
+      rfNodes: layoutWithDagre(mappedNodes, mappedEdges),
+      rfEdges: mappedEdges,
+    }
+  }, [nodes, edges, selectedKey])
 
   return (
     <div className="execution-graph-canvas">
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={rfNodes}
+        edges={rfEdges}
         nodeTypes={nodeTypes}
         fitView
         nodesDraggable={false}

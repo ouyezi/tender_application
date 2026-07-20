@@ -2,8 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getExecutionGraph, getTask } from '../api'
 import ExecutionGraph from '../components/execution/ExecutionGraph'
+import ExecutionStepList from '../components/execution/ExecutionStepList'
+import {
+  NODE_STATUS_LABELS,
+  formatDuration,
+  sortExecutionSteps,
+} from '../components/execution/executionFormatters.js'
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'stopped'])
+const BID_RETRIEVAL_KEY = 'bid.retrieval'
 
 const TASK_STATUS_LABELS = {
   interpreting: '解读中',
@@ -16,23 +23,8 @@ const TASK_STATUS_LABELS = {
   failed: '失败',
 }
 
-const NODE_STATUS_LABELS = {
-  pending: '等待',
-  running: '运行中',
-  completed: '完成',
-  failed: '失败',
-  interrupted: '中断',
-  skipped: '跳过',
-}
-
-function formatDuration(ms) {
-  if (ms == null || ms <= 0) return '—'
-  if (ms < 1000) return `${ms}ms`
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const rem = seconds % 60
-  return rem ? `${minutes}m ${rem}s` : `${minutes}m`
+function isMainGraphNode(node) {
+  return node.parent_key !== BID_RETRIEVAL_KEY
 }
 
 export default function TaskProcessPage() {
@@ -42,6 +34,7 @@ export default function TaskProcessPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
+  const [selectedStepKey, setSelectedStepKey] = useState(null)
 
   const load = useCallback(
     async (silent = false) => {
@@ -78,15 +71,59 @@ export default function TaskProcessPage() {
     return () => clearInterval(timer)
   }, [graph, isTerminal, load])
 
+  const mainGraphNodes = useMemo(
+    () => (graph?.nodes ?? []).filter(isMainGraphNode),
+    [graph],
+  )
+
+  const mainGraphKeys = useMemo(
+    () => new Set(mainGraphNodes.map((n) => n.key)),
+    [mainGraphNodes],
+  )
+
+  const mainGraphEdges = useMemo(
+    () =>
+      (graph?.edges ?? []).filter(
+        (e) => mainGraphKeys.has(e.from) && mainGraphKeys.has(e.to),
+      ),
+    [graph, mainGraphKeys],
+  )
+
+  const bidRetrievalSteps = useMemo(
+    () =>
+      sortExecutionSteps(
+        (graph?.nodes ?? []).filter((n) => n.parent_key === BID_RETRIEVAL_KEY),
+      ),
+    [graph],
+  )
+
   const selectedNode = useMemo(
     () => graph?.nodes?.find((n) => n.key === selectedKey) ?? null,
     [graph, selectedKey],
   )
 
-  const runningNode = useMemo(
-    () => graph?.nodes?.find((n) => n.status === 'running') ?? null,
-    [graph],
+  const selectedStep = useMemo(
+    () =>
+      selectedStepKey != null
+        ? graph?.nodes?.find((n) => n.key === selectedStepKey) ?? null
+        : null,
+    [graph, selectedStepKey],
   )
+
+  const runningNode = useMemo(() => {
+    const visible = mainGraphNodes.filter((n) => n.status === 'running')
+    if (visible.length > 0) return visible[0]
+    return graph?.nodes?.find((n) => n.status === 'running') ?? null
+  }, [graph, mainGraphNodes])
+
+  const handleSelectNode = (key) => {
+    setSelectedKey(key)
+    setSelectedStepKey(null)
+  }
+
+  const handleSelectStep = (key) => {
+    setSelectedStepKey(key)
+  }
 
   if (loading && !graph) {
     return (
@@ -110,6 +147,8 @@ export default function TaskProcessPage() {
   const statusLabel = TASK_STATUS_LABELS[taskStatus] || taskStatus || '—'
   const isLegacy = graph?.legacy || !graph?.nodes?.length
   const summary = graph?.summary
+  const detailNode = selectedStep ?? selectedNode
+  const isBidRetrievalContainer = selectedNode?.key === BID_RETRIEVAL_KEY
 
   return (
     <main className="page task-process-page">
@@ -160,9 +199,10 @@ export default function TaskProcessPage() {
           <div className="process-layout">
             <section className="process-graph-panel">
               <ExecutionGraph
-                graph={graph}
+                nodes={mainGraphNodes}
+                edges={mainGraphEdges}
                 selectedKey={selectedKey}
-                onSelectNode={setSelectedKey}
+                onSelectNode={handleSelectNode}
               />
             </section>
 
@@ -178,7 +218,9 @@ export default function TaskProcessPage() {
                     <div>
                       <dt>状态</dt>
                       <dd>
-                        <span className={`execution-node-status node-status-${selectedNode.status}`}>
+                        <span
+                          className={`execution-node-status node-status-${selectedNode.status}`}
+                        >
                           {NODE_STATUS_LABELS[selectedNode.status] || selectedNode.status}
                         </span>
                       </dd>
@@ -194,11 +236,23 @@ export default function TaskProcessPage() {
                       </dd>
                     </div>
                   </dl>
-                  {selectedNode.meta && Object.keys(selectedNode.meta).length > 0 && (
+
+                  {isBidRetrievalContainer && (
+                    <div className="process-subflow-block">
+                      <h3>子流程</h3>
+                      <ExecutionStepList
+                        steps={bidRetrievalSteps}
+                        selectedStepKey={selectedStepKey}
+                        onSelectStep={handleSelectStep}
+                      />
+                    </div>
+                  )}
+
+                  {detailNode?.meta && Object.keys(detailNode.meta).length > 0 && (
                     <div className="process-meta-block">
-                      <h3>Meta</h3>
+                      <h3>{selectedStep ? '步骤 Meta' : 'Meta'}</h3>
                       <pre className="process-meta-json">
-                        {JSON.stringify(selectedNode.meta, null, 2)}
+                        {JSON.stringify(detailNode.meta, null, 2)}
                       </pre>
                     </div>
                   )}
