@@ -38,6 +38,35 @@ async def test_rerank_returns_ordered_ids():
 
 
 @pytest.mark.asyncio
+async def test_rerank_falls_back_to_output_json_array():
+    async def fake_invoke(app_name, input_data):
+        del app_name, input_data
+        return {
+            "status": "completed",
+            "output": json.dumps(["c1", "c2"]),
+            "structuredOutput": None,
+        }
+
+    reranker = AgentOSAiReranker(invoke_app=fake_invoke)
+    out = await reranker.rerank("退款", [_hit("c2"), _hit("c1")])
+    assert out == ["c1", "c2"]
+
+
+@pytest.mark.asyncio
+async def test_rerank_prefers_chunk_ids_json_over_output():
+    async def fake_invoke(app_name, input_data):
+        del app_name, input_data
+        return {
+            "chunk_ids_json": json.dumps(["c1", "c2"]),
+            "output": json.dumps(["c2", "c1"]),
+        }
+
+    reranker = AgentOSAiReranker(invoke_app=fake_invoke)
+    out = await reranker.rerank("退款", [_hit("c2"), _hit("c1")])
+    assert out == ["c1", "c2"]
+
+
+@pytest.mark.asyncio
 async def test_rerank_unknown_id_raises():
     async def fake_invoke(app_name, input_data):
         del app_name, input_data

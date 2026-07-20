@@ -15,6 +15,28 @@ class AiRerankResponseError(ValueError):
     pass
 
 
+def _parse_chunk_ids(payload: dict[str, object]) -> object:
+    raw_chunk_ids = payload.get("chunk_ids_json")
+    if isinstance(raw_chunk_ids, str):
+        try:
+            return json.loads(raw_chunk_ids)
+        except json.JSONDecodeError as exc:
+            raise AiRerankResponseError("chunk_ids_json invalid") from exc
+    if isinstance(raw_chunk_ids, list):
+        return raw_chunk_ids
+
+    # Agent OS may leave structuredOutput empty while still returning a bare
+    # JSON array in output when formatOutput binding fails.
+    output = payload.get("output")
+    if isinstance(output, str) and output.strip():
+        try:
+            return json.loads(output.strip())
+        except json.JSONDecodeError as exc:
+            raise AiRerankResponseError("chunk_ids_json missing") from exc
+
+    raise AiRerankResponseError("chunk_ids_json missing")
+
+
 class AgentOSAiReranker:
     def __init__(
         self,
@@ -55,16 +77,7 @@ class AgentOSAiReranker:
                 ),
             }
         )
-        raw_chunk_ids = payload.get("chunk_ids_json")
-        if isinstance(raw_chunk_ids, str):
-            try:
-                chunk_ids = json.loads(raw_chunk_ids)
-            except json.JSONDecodeError as exc:
-                raise AiRerankResponseError("chunk_ids_json invalid") from exc
-        elif isinstance(raw_chunk_ids, list):
-            chunk_ids = raw_chunk_ids
-        else:
-            raise AiRerankResponseError("chunk_ids_json missing")
+        chunk_ids = _parse_chunk_ids(payload)
 
         if not isinstance(chunk_ids, list) or not all(isinstance(c, str) for c in chunk_ids):
             raise AiRerankResponseError("chunk_ids must be string list")
