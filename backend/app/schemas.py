@@ -219,3 +219,43 @@ class ContentOut(BaseModel):
     # 仅本节正文（不含子章节）的起止，便于对照
     section_start: int = 0
     section_end: int = 0
+
+
+class ExecutionNodeOut(BaseModel):
+    id: str
+    key: str
+    label: str
+    kind: str
+    status: str
+    parent_key: Optional[str] = None
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutionEdgeOut(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_key: str = Field(alias="from")
+    to_key: str = Field(alias="to")
+    kind: str
+
+
+class ExecutionGraphSummaryOut(BaseModel):
+    total_nodes: int
+    completed: int
+    running: int
+    failed: int
+    pending: int
+    total_duration_ms: int
+
+
+class ExecutionGraphOut(BaseModel):
+    task_id: str
+    task_status: str
+    is_terminal: bool
+    legacy: bool
+    summary: ExecutionGraphSummaryOut
+    nodes: list[ExecutionNodeOut]
+    edges: list[ExecutionEdgeOut]

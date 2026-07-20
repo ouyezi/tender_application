@@ -13,8 +13,10 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
-from app.schemas import ChecklistReportOut, TaskListOut, TaskOut
+from app.schemas import ChecklistReportOut, ExecutionGraphOut, TaskListOut, TaskOut
 from app.services import checklist_service, files, parse_scheduler, scheduler, task_delete, workspace
+from app.services.execution_graph import get_tracker
+from app.services.execution_graph.query import build_execution_graph_response
 from app.services.checklist_service import (
     ChecklistNotAvailable,
     ChecklistTaskNotFound,
@@ -153,6 +155,8 @@ async def create_task(
     await db.commit()
     await db.refresh(task)
 
+    await get_tracker(task_id).init_graph()
+
     await parse_scheduler.kick()
     await scheduler.start_task(task_id)
 
@@ -229,6 +233,17 @@ async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
         report_markdown=_read_report_markdown(task),
         interpret_markdown=_read_interpret_markdown(task),
     )
+
+
+@router.get("/{task_id}/execution-graph", response_model=ExecutionGraphOut)
+async def get_execution_graph(
+    task_id: str, db: AsyncSession = Depends(get_db)
+) -> ExecutionGraphOut:
+    task = await db.get(DiagnosisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    payload = await build_execution_graph_response(db, task)
+    return ExecutionGraphOut.model_validate(payload)
 
 
 @router.get("/{task_id}/report.docx")

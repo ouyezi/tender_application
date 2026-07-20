@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -272,3 +273,38 @@ class IndexJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ExecutionNode(Base):
+    __tablename__ = "execution_nodes"
+    __table_args__ = (
+        UniqueConstraint("task_id", "node_key", name="uq_execution_nodes_task_key"),
+        Index("ix_execution_nodes_task_status", "task_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id: Mapped[str] = mapped_column(ForeignKey("diagnosis_tasks.id"), nullable=False, index=True)
+    node_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    parent_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    label: Mapped[str] = mapped_column(String(256), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="stage")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    meta: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ExecutionEdge(Base):
+    __tablename__ = "execution_edges"
+    __table_args__ = (
+        UniqueConstraint("task_id", "from_key", "to_key", name="uq_execution_edges_task_from_to"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id: Mapped[str] = mapped_column(ForeignKey("diagnosis_tasks.id"), nullable=False, index=True)
+    from_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    to_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    edge_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="sequential")

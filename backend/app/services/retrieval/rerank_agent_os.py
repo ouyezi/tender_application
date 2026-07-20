@@ -37,6 +37,23 @@ def _parse_chunk_ids(payload: dict[str, object]) -> object:
     raise AiRerankResponseError("chunk_ids_json missing")
 
 
+def _normalize_rerank_ids(returned: list[str], hits: list[RetrievalHit]) -> list[str]:
+    """Repair AI output into a full permutation of input ids."""
+    input_order = [hit.chunk_id for hit in hits]
+    expected = set(input_order)
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for chunk_id in returned:
+        if chunk_id not in expected or chunk_id in seen:
+            continue
+        seen.add(chunk_id)
+        ordered.append(chunk_id)
+    for chunk_id in input_order:
+        if chunk_id not in seen:
+            ordered.append(chunk_id)
+    return ordered
+
+
 class AgentOSAiReranker:
     def __init__(
         self,
@@ -60,6 +77,9 @@ class AgentOSAiReranker:
         requirement: str,
         hits: list[RetrievalHit],
     ) -> list[str]:
+        if not hits:
+            return []
+
         payload = await self._invoke(
             {
                 "requirement": requirement,
@@ -85,6 +105,6 @@ class AgentOSAiReranker:
         expected = {hit.chunk_id for hit in hits}
         returned = [str(c) for c in chunk_ids]
         if set(returned) != expected or len(returned) != len(expected):
-            raise AiRerankResponseError("chunk_ids must be permutation of input ids")
+            return _normalize_rerank_ids(returned, hits)
 
         return returned

@@ -16,6 +16,10 @@ export function getTask(id) {
   return request(`/api/tasks/${id}`)
 }
 
+export function getExecutionGraph(taskId) {
+  return request(`/api/tasks/${encodeURIComponent(taskId)}/execution-graph`)
+}
+
 export function createTask(formData) {
   return request('/api/tasks', { method: 'POST', body: formData })
 }
