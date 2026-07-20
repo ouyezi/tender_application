@@ -1144,3 +1144,65 @@ async def test_recovery_removes_staged_when_formal_artifact_exists(
         ).read_text(encoding="utf-8")
     )
     assert formal_payload["schema_version"] == "1"
+
+
+def test_compliance_rules_allows_empty_cannot_satisfy():
+    from app.services.checklist_service import (
+        _COMPLIANCE_KEYS,
+        _COMPLIANCE_OPTIONAL_EMPTY_KEYS,
+        _require_rules,
+    )
+
+    _require_rules(
+        {
+            "satisfied": "满足",
+            "violated": "违反",
+            "cannot_satisfy": "",
+            "insufficient_evidence": "证据不足",
+        },
+        "item compliance_rules",
+        _COMPLIANCE_KEYS,
+        optional_empty_keys=_COMPLIANCE_OPTIONAL_EMPTY_KEYS,
+    )
+
+
+def test_compliance_rules_allows_empty_insufficient_evidence():
+    from app.services.checklist_service import (
+        _COMPLIANCE_KEYS,
+        _COMPLIANCE_OPTIONAL_EMPTY_KEYS,
+        _require_rules,
+    )
+
+    _require_rules(
+        {
+            "satisfied": "满足",
+            "violated": "违反",
+            "cannot_satisfy": "",
+            "insufficient_evidence": "",
+        },
+        "item compliance_rules",
+        _COMPLIANCE_KEYS,
+        optional_empty_keys=_COMPLIANCE_OPTIONAL_EMPTY_KEYS,
+    )
+
+
+def test_compliance_rules_rejects_empty_satisfied():
+    from app.services.checklist_service import (
+        ChecklistValidationError,
+        _COMPLIANCE_KEYS,
+        _COMPLIANCE_OPTIONAL_EMPTY_KEYS,
+        _require_rules,
+    )
+
+    with pytest.raises(ChecklistValidationError, match="non-empty"):
+        _require_rules(
+            {
+                "satisfied": "",
+                "violated": "违反",
+                "cannot_satisfy": "",
+                "insufficient_evidence": "",
+            },
+            "item compliance_rules",
+            _COMPLIANCE_KEYS,
+            optional_empty_keys=_COMPLIANCE_OPTIONAL_EMPTY_KEYS,
+        )

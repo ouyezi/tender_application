@@ -155,6 +155,7 @@ class BatchItemResult:
     consequence_tags: list[str]
     evidence: str
     suggestion: str
+    response_content: str = ""
     description: str = ""
 
 

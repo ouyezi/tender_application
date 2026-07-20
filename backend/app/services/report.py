@@ -92,6 +92,9 @@ def build_markdown(task_id: str, results: list[dict]) -> str:
         )
         if consequence_text:
             lines.append(f"- **后果标签：** {consequence_text}")
+        response_content = item.get("response_content", "")
+        if response_content:
+            lines.append(f"- **应答内容：** {response_content}")
         lines.extend(
             [
                 f"- **证据：** {item.get('evidence', '')}",
@@ -148,6 +151,7 @@ async def generate_and_save_reports(
                 "consequence_tags": consequence_tags,
                 "evidence": row.evidence,
                 "suggestion": row.suggestion,
+                "response_content": row.response_content,
             }
         )
 

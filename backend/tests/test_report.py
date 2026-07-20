@@ -20,6 +20,7 @@ def test_build_markdown_contains_titles():
             "result": "violated",
             "compliance_status": "violated",
             "consequence_tags": ["score_risk", "general_risk"],
+            "response_content": "综合折扣率 B=92.5%，基准折扣率 C=95.0%，按低价优惠系数计算价格得分 17.37 分",
             "evidence": "e",
             "suggestion": "s",
         },
@@ -29,6 +30,8 @@ def test_build_markdown_contains_titles():
     assert "资质" in md
     assert "违反" in md
     assert "得分风险" in md
+    assert "应答内容" in md
+    assert "17.37 分" in md
 
 
 def test_build_markdown_manual_required_label():

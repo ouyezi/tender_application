@@ -54,6 +54,7 @@ class ResultOut(BaseModel):
     result: str
     evidence: str
     suggestion: str
+    response_content: str = ""
     compliance_status: Optional[str] = None
     consequence_tags: List[str] = Field(default_factory=list)
     sort_order: int

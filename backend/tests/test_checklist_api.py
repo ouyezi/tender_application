@@ -372,6 +372,7 @@ def test_result_out_defaults_new_fields_for_legacy_rows():
     assert model.checklist_item_id is None
     assert model.compliance_status is None
     assert model.consequence_tags == []
+    assert model.response_content == ""
     assert model.consequence_tags is not ResultOut.model_validate(
         {
             "id": 2,

@@ -152,6 +152,9 @@ class DiagnosisResult(Base):
     result: Mapped[str] = mapped_column(String(64), nullable=False)
     evidence: Mapped[str] = mapped_column(Text, default="")
     suggestion: Mapped[str] = mapped_column(Text, default="")
+    response_content: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )
     compliance_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     consequence_tags: Mapped[str] = mapped_column(
         Text, nullable=False, default="[]", server_default="[]"

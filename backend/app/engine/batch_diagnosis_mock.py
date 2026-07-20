@@ -62,6 +62,9 @@ class MockBatchDiagnosisEngine:
                     suggestion=(
                         f"Mock suggestion for 「{title}」: compliance={compliance}"
                     ),
+                    response_content=(
+                        f"[{task_id}] mock response content for checklist item {item_id}"
+                    ),
                     description=description,
                 )
             )

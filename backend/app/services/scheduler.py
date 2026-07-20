@@ -88,6 +88,7 @@ def _offline_batch_result(item: dict):
         consequence_tags=tags,
         evidence=OFFLINE_EVIDENCE,
         suggestion=OFFLINE_SUGGESTION,
+        response_content="",
         description=description,
     )
 
@@ -568,6 +569,7 @@ async def _run_diagnosis_phase(task_id: str) -> bool:
                             ),
                             evidence=batch_result.evidence,
                             suggestion=batch_result.suggestion,
+                            response_content=batch_result.response_content,
                             sort_order=sort_order,
                         )
                     )

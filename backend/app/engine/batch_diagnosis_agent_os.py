@@ -59,6 +59,7 @@ def parse_batch_diagnosis_payload(payload: dict[str, Any]) -> list[BatchItemResu
                 consequence_tags=tags,
                 evidence=str(row.get("evidence") or ""),
                 suggestion=str(row.get("suggestion") or ""),
+                response_content=str(row.get("response_content") or ""),
                 description=str(row.get("description") or ""),
             )
         )

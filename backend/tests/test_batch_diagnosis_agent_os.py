@@ -19,6 +19,7 @@ def test_parse_batch_diagnosis_payload_ok():
                     "consequence_tags": ["score_risk"],
                     "evidence": "见第3页营业执照",
                     "suggestion": "保持现有材料",
+                    "response_content": "已提供有效营业执照复印件",
                     "description": "执照齐全",
                 }
             ],
@@ -27,6 +28,7 @@ def test_parse_batch_diagnosis_payload_ok():
     assert len(draft) == 1
     assert draft[0].checklist_item_id == "i1"
     assert draft[0].compliance == "satisfied"
+    assert draft[0].response_content == "已提供有效营业执照复印件"
 
 
 def test_parse_rejects_bad_compliance():
@@ -63,6 +65,7 @@ async def test_diagnose_category_invokes_app():
                         "consequence_tags": [],
                         "evidence": "检索块不足",
                         "suggestion": "补充材料",
+                        "response_content": "标书未找到相关响应",
                         "description": "无法判定",
                     }
                 ],

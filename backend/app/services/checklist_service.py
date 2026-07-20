@@ -44,6 +44,7 @@ from app.services.checklist_context import (
 )
 
 _IMPORTANCE_VALUES = {"high", "medium", "low"}
+_COMPLIANCE_OPTIONAL_EMPTY_KEYS = frozenset({"cannot_satisfy", "insufficient_evidence"})
 _COMPLIANCE_KEYS = {
     "satisfied",
     "violated",
@@ -397,13 +398,20 @@ def _require_string_list(
         )
 
 
-def _require_rules(value: Any, field: str, allowed_keys: set[str]) -> None:
+def _require_rules(
+    value: Any,
+    field: str,
+    allowed_keys: set[str],
+    *,
+    optional_empty_keys: frozenset[str] | None = None,
+) -> None:
     if not isinstance(value, dict) or not value:
         raise ChecklistValidationError(f"{field} must be a non-empty dict[str, str]")
+    optional_empty = optional_empty_keys or frozenset()
     if any(
         not isinstance(key, str)
         or not isinstance(rule, str)
-        or not rule.strip()
+        or (not rule.strip() and key not in optional_empty)
         for key, rule in value.items()
     ):
         raise ChecklistValidationError(
@@ -579,6 +587,7 @@ def validate_draft(
             item.compliance_rules,
             "item compliance_rules",
             _COMPLIANCE_KEYS,
+            optional_empty_keys=_COMPLIANCE_OPTIONAL_EMPTY_KEYS,
         )
         _require_rules(
             item.consequence_rules,
