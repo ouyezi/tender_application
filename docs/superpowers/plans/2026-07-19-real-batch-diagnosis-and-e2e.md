@@ -1161,6 +1161,10 @@ git commit -m "test: add real-file API e2e diagnosis script"
 .venv/bin/python scripts/e2e_diagnosis_flow.py
 ```
 
+> **Observability follow-up:** 完整跑通的取证与 findings 见
+> `docs/superpowers/plans/2026-07-20-e2e-diagnosis-observability-findings.md`
+> （spec: `docs/superpowers/specs/2026-07-20-e2e-diagnosis-observability-findings-design.md`）。
+
 Expected: 打印 `E2E OK ...`，退出码 0。失败则根据 `failure_stage` 排查。
 
 ---
