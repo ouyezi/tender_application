@@ -48,6 +48,7 @@ async def register_task_documents(
     tender_filename: str,
     bid_path: str,
     bid_filename: str,
+    enqueue_parse: bool = True,
 ) -> tuple[WorkspaceFile, WorkspaceFile]:
     artifact.ensure_artifact_dirs(task_id)
     pairs = [
@@ -73,7 +74,8 @@ async def register_task_documents(
         )
         session.add(wf)
         await session.flush()
-        await enqueue_parse(session, wf)
+        if enqueue_parse:
+            await enqueue_parse(session, wf)
         created.append(wf)
         if task is not None:
             if role == "tender":

@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
 from app.schemas import ChecklistReportOut, ExecutionGraphOut, TaskListOut, TaskOut
-from app.services import checklist_service, files, parse_scheduler, scheduler, task_delete, workspace
+from app.services import checklist_service, files, scheduler, task_delete, workspace
 from app.services.execution_graph import get_tracker
 from app.services.execution_graph.query import build_execution_graph_response
 from app.services.checklist_service import (
@@ -135,7 +135,7 @@ async def create_task(
         bid_path=bid_path,
         background=background,
         requirements=requirements,
-        status="interpreting",
+        status="draft",
         progress_done=0,
         progress_total=0,
         config_snapshot=json.dumps(snapshot, ensure_ascii=False),
@@ -151,14 +151,12 @@ async def create_task(
         tender_filename=tender_filename,
         bid_path=bid_path,
         bid_filename=bid_filename,
+        enqueue_parse=False,
     )
     await db.commit()
     await db.refresh(task)
 
     await get_tracker(task_id).init_graph()
-
-    await parse_scheduler.kick()
-    await scheduler.start_task(task_id)
 
     return _task_to_out(task, results=[])
 
