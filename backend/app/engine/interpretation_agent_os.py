@@ -18,6 +18,21 @@ class InterpretationResponseError(RuntimeError):
     pass
 
 
+def _extract_report_markdown(response: dict[str, Any]) -> str:
+    report_markdown = response.get("report_markdown")
+    if isinstance(report_markdown, str) and report_markdown.strip():
+        return report_markdown
+
+    output = response.get("output")
+    if isinstance(output, str) and output.strip():
+        return output
+
+    raise InterpretationResponseError(
+        "Agent OS interpretation response for app "
+        f"{TENDER_INTERPRETER_APP_NAME!r} has empty or invalid markdown output"
+    )
+
+
 class AgentOSInterpretationAgent:
     def __init__(
         self,
@@ -42,10 +57,11 @@ class AgentOSInterpretationAgent:
             "interpretation_requirements": requirements,
         }
         response = await self._client.invoke_app(self._app_name, input_data)
-        report_markdown = response.get("report_markdown")
-        if not isinstance(report_markdown, str) or not report_markdown.strip():
+        try:
+            report_markdown = _extract_report_markdown(response)
+        except InterpretationResponseError as exc:
             raise InterpretationResponseError(
                 "Agent OS interpretation response for app "
-                f"{self._app_name!r} has invalid field 'report_markdown'"
-            )
+                f"{self._app_name!r} has empty or invalid markdown output"
+            ) from exc
         return InterpretationResult(markdown=report_markdown)

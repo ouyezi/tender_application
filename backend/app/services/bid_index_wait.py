@@ -33,6 +33,12 @@ async def wait_for_bid_index_ready(
     tracker = get_tracker(task_id)
     async with tracker.track("index.gate", label="等待标书索引"):
         while True:
+            from app.services.scheduler import _should_stop, _wait_if_paused
+
+            await _wait_if_paused(task_id)
+            if _should_stop(task_id):
+                raise BidIndexBlockedError("task_stopped")
+
             async with database.SessionLocal() as session:
                 task = await session.get(DiagnosisTask, task_id)
                 if task is None:

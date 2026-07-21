@@ -88,6 +88,26 @@ async def register_task_documents(
     return created[0], created[1]
 
 
+async def ensure_file_parse_enqueued(session: AsyncSession, file_id: str) -> bool:
+    wf = await session.get(WorkspaceFile, file_id)
+    if wf is None:
+        raise LookupError(file_id)
+    if wf.parse_status == "succeeded":
+        return False
+    existing = (
+        await session.execute(
+            select(ParseJob).where(
+                ParseJob.file_id == file_id,
+                ParseJob.status.in_(("queued", "running")),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return False
+    await enqueue_parse(session, wf)
+    return True
+
+
 async def artifact_refresh_index(session: AsyncSession, task_id: str) -> None:
     rows = (
         await session.execute(select(WorkspaceFile).where(WorkspaceFile.task_id == task_id))

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import io
+from datetime import datetime, timezone
 
 import pytest
 
 from app import db
-from app.models import DiagnosisTask
+from app.models import DiagnosisTask, ExecutionNode
 from app.services.execution_graph import get_tracker
 from app.services.execution_graph.query import BID_RETRIEVAL_CHILD_KEYS
 
@@ -78,6 +79,68 @@ async def test_execution_graph_rollups_bid_retrieval_completed(client):
     r = await client.get(f"/api/tasks/{task_id}/execution-graph")
     body = r.json()
     container = next(n for n in body["nodes"] if n["key"] == "bid.retrieval")
+    assert container["status"] == "completed"
+    assert container["duration_ms"] is not None
+
+
+@pytest.mark.asyncio
+async def test_execution_graph_rollup_mixed_timezone(client):
+    """Completed task with stale running child (naive DB times + aware sanitize)."""
+    task_id = "T-TZ-MIX-001"
+    naive_start = datetime(2026, 7, 20, 10, 0, 0)
+    naive_end = datetime(2026, 7, 20, 10, 5, 0)
+    async with db.SessionLocal() as session:
+        session.add(
+            DiagnosisTask(
+                id=task_id,
+                tender_filename="t.pdf",
+                tender_path="/tmp/t.pdf",
+                bid_filename="b.docx",
+                bid_path="/tmp/b.docx",
+                status="completed",
+            )
+        )
+        session.add_all(
+            [
+                ExecutionNode(
+                    id="n-container",
+                    task_id=task_id,
+                    node_key="bid.retrieval",
+                    label="Bid retrieval",
+                    kind="container",
+                    status="pending",
+                    sort_order=10,
+                ),
+                ExecutionNode(
+                    id="n-done",
+                    task_id=task_id,
+                    node_key="parse.bid",
+                    parent_key="bid.retrieval",
+                    label="Parse bid",
+                    kind="step",
+                    status="completed",
+                    started_at=naive_start,
+                    ended_at=naive_end,
+                    duration_ms=300_000,
+                    sort_order=11,
+                ),
+                ExecutionNode(
+                    id="n-stale",
+                    task_id=task_id,
+                    node_key="index.wiki",
+                    parent_key="bid.retrieval",
+                    label="Index wiki",
+                    kind="step",
+                    status="running",
+                    started_at=naive_start,
+                    sort_order=12,
+                ),
+            ]
+        )
+        await session.commit()
+    r = await client.get(f"/api/tasks/{task_id}/execution-graph")
+    assert r.status_code == 200
+    container = next(n for n in r.json()["nodes"] if n["key"] == "bid.retrieval")
     assert container["status"] == "completed"
     assert container["duration_ms"] is not None
 

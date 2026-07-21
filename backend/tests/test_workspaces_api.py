@@ -255,7 +255,8 @@ async def test_reparse_failed_file(client, monkeypatch):
         jobs = (
             await session.execute(select(ParseJob).where(ParseJob.file_id == file_id))
         ).scalars().all()
-        assert any(j.attempt >= 2 for j in jobs)
+        assert len(jobs) == 1
+        assert jobs[0].attempt == 1
 
     r2 = await client.post(f"/api/workspaces/{task_id}/files/{file_id}/reparse")
     assert r2.status_code == 409

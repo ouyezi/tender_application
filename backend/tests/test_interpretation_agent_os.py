@@ -32,7 +32,7 @@ def test_constructor_depends_on_minimal_invoker_protocol() -> None:
 
 @pytest.mark.asyncio
 async def test_invokes_published_app_with_exact_input_schema() -> None:
-    client = FakeAgentOSClient({"report_markdown": "# 解读报告"})
+    client = FakeAgentOSClient({"output": "# 解读报告\n"})
     agent = AgentOSInterpretationAgent(client)
 
     result = await agent.interpret(
@@ -58,7 +58,7 @@ async def test_invokes_published_app_with_exact_input_schema() -> None:
 
 @pytest.mark.asyncio
 async def test_passes_empty_optional_text_fields_unchanged() -> None:
-    client = FakeAgentOSClient({"report_markdown": "报告"})
+    client = FakeAgentOSClient({"output": "报告"})
 
     await AgentOSInterpretationAgent(client).interpret(
         task_id="TASK-1",
@@ -76,7 +76,7 @@ async def test_passes_empty_optional_text_fields_unchanged() -> None:
 
 @pytest.mark.asyncio
 async def test_allows_custom_app_name_injection() -> None:
-    client = FakeAgentOSClient({"report_markdown": "报告"})
+    client = FakeAgentOSClient({"output": "报告"})
 
     await AgentOSInterpretationAgent(
         client, app_name="test-interpreter"
@@ -91,8 +91,23 @@ async def test_allows_custom_app_name_injection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_preserves_report_markdown_exactly() -> None:
+async def test_preserves_markdown_exactly() -> None:
     markdown = "\n  # 标题\n\n- 条目  \n"
+    client = FakeAgentOSClient({"output": markdown})
+
+    result = await AgentOSInterpretationAgent(client).interpret(
+        task_id="TASK-1",
+        tender_text="正文",
+        background="背景",
+        requirements="要求",
+    )
+
+    assert result.markdown == markdown
+
+
+@pytest.mark.asyncio
+async def test_accepts_legacy_report_markdown_field() -> None:
+    markdown = "# 招标文件解读报告\n\n## 一、项目基础信息\n"
     client = FakeAgentOSClient({"report_markdown": markdown})
 
     result = await AgentOSInterpretationAgent(client).interpret(
@@ -109,11 +124,12 @@ async def test_preserves_report_markdown_exactly() -> None:
     "response",
     [
         {},
-        {"report_markdown": None},
-        {"report_markdown": 123},
+        {"output": None},
+        {"output": 123},
+        {"output": " \n\t "},
         {"report_markdown": " \n\t "},
     ],
-    ids=["missing", "none", "non-string", "blank"],
+    ids=["missing", "none", "non-string", "blank-output", "blank-legacy"],
 )
 @pytest.mark.asyncio
 async def test_rejects_invalid_report_without_leaking_response(
@@ -135,7 +151,7 @@ async def test_rejects_invalid_report_without_leaking_response(
 
     message = str(caught.value)
     assert app_name in message
-    assert "report_markdown" in message
+    assert "markdown output" in message
     assert sensitive_tender not in message
     assert sensitive_response not in message
     assert repr(response) not in message

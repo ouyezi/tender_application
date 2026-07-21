@@ -51,7 +51,7 @@ async def _seed_configs(client: AsyncClient, n: int = 3) -> None:
         assert r.status_code == 201
 
 
-async def _create_task(client: AsyncClient) -> dict:
+async def _create_task(client: AsyncClient, *, run_full: bool = True) -> dict:
     files = {
         "tender_file": ("tender.pdf", io.BytesIO(_pdf_bytes()), "application/pdf"),
         "bid_file": (
@@ -66,7 +66,16 @@ async def _create_task(client: AsyncClient) -> dict:
         files=files,
     )
     assert r.status_code == 201
-    return r.json()
+    body = r.json()
+    assert body["status"] == "draft"
+    if run_full:
+        await _start_full(client, body["id"])
+    return body
+
+
+async def _start_full(client: AsyncClient, task_id: str) -> None:
+    r = await client.post(f"/api/tasks/{task_id}/actions/run-full")
+    assert r.status_code == 202
 
 
 async def _wait_for_checklist_items(client: AsyncClient, task_id: str) -> int:
@@ -309,7 +318,7 @@ async def test_tender_content_failure_fails_interpreting_stage(client, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_cannot_pause_while_interpreting(client, monkeypatch):
+async def test_can_pause_while_interpreting(client, monkeypatch):
     gate = asyncio.Event()
 
     class SlowAgent:
@@ -336,9 +345,11 @@ async def test_cannot_pause_while_interpreting(client, monkeypatch):
     assert saw_interpreting, "never saw interpreting status"
 
     r = await client.post(f"/api/tasks/{task_id}/pause")
-    assert r.status_code == 409
+    assert r.status_code == 200
+    assert r.json()["status"] == "paused"
 
     gate.set()
+    await client.post(f"/api/tasks/{task_id}/resume")
     await scheduler.wait_for_terminal(task_id, timeout=10)
 
 
@@ -405,7 +416,7 @@ async def test_parse_failed_marks_failed_with_failure_stage(client, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_cannot_pause_while_generating_checklist(client, monkeypatch):
+async def test_can_pause_while_generating_checklist(client, monkeypatch):
     gate = asyncio.Event()
 
     class BlockingChecklistAgent:
@@ -432,9 +443,11 @@ async def test_cannot_pause_while_generating_checklist(client, monkeypatch):
     assert saw_generating, "never saw generating_checklist status"
 
     r = await client.post(f"/api/tasks/{task_id}/pause")
-    assert r.status_code == 409
+    assert r.status_code == 200
+    assert r.json()["status"] == "paused"
 
     gate.set()
+    await client.post(f"/api/tasks/{task_id}/resume")
     await scheduler.wait_for_terminal(task_id, timeout=10)
 
 
@@ -799,3 +812,39 @@ async def test_diagnosis_skips_index_wait_when_all_offline(monkeypatch, client):
 
     assert await scheduler._run_diagnosis_phase("task-all-offline") is True
     assert wait_calls["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_start_generate_checklist_from_draft(client):
+    await _seed_configs(client, 1)
+    body = await _create_task(client, run_full=False)
+    task_id = body["id"]
+
+    r = await client.post(f"/api/tasks/{task_id}/actions/generate-checklist")
+    assert r.status_code == 202
+
+    status = await scheduler.wait_for_idle(task_id, timeout=60)
+    assert status in ("draft", "failed")
+
+    detail = (await client.get(f"/api/tasks/{task_id}")).json()
+    assert detail["current_checklist_generation_id"] is not None
+    assert detail["interpret_md_path"]
+    assert detail["status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_pause_during_generating_checklist(client):
+    await _seed_configs(client, 2)
+    body = await _create_task(client, run_full=False)
+    task_id = body["id"]
+    await client.post(f"/api/tasks/{task_id}/actions/generate-checklist")
+
+    for _ in range(50):
+        detail = (await client.get(f"/api/tasks/{task_id}")).json()
+        if detail["status"] in ("generating_checklist", "interpreting"):
+            break
+        await asyncio.sleep(0.02)
+
+    r = await client.post(f"/api/tasks/{task_id}/pause")
+    assert r.status_code == 200
+    assert r.json()["status"] == "paused"

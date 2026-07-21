@@ -35,6 +35,9 @@ from app.services.checklist_service import (
 from app.services.checklist_context import ChecklistInputError
 from app.services.execution_graph import get_tracker
 from app.services.tender_content import TenderContentProvider, TenderContentStopped
+from app.services import parse_scheduler, workspace
+from sqlalchemy import select
+from app.models import IndexJob
 
 
 class SchedulerConflict(Exception):
@@ -50,8 +53,26 @@ def build_retrieval_provider():
 
 
 TERMINAL_STATUSES = frozenset({"completed", "stopped", "failed"})
+PAUSABLE_STATUSES = frozenset(
+    {
+        "interpreting",
+        "generating_checklist",
+        "indexing_bid",
+        "diagnosing",
+        "running",
+    }
+)
+IDLE_STATUS = "draft"
 STOPPABLE_STATUSES = frozenset(
-    {"interpreting", "generating_checklist", "diagnosing", "running", "paused"}
+    {
+        "interpreting",
+        "generating_checklist",
+        "indexing_bid",
+        "diagnosing",
+        "running",
+        "paused",
+        "draft",
+    }
 )
 
 OFFLINE_EVIDENCE = "未检索文件（线下核验项）"
@@ -106,16 +127,58 @@ def _build_interpretation_agent() -> AgentOSInterpretationAgent:
 class _TaskControl:
     pause_event: asyncio.Event = field(default_factory=asyncio.Event)
     stop_requested: bool = False
-    bg_task: Optional[asyncio.Task] = None
+    checklist_task: Optional[asyncio.Task] = None
+    bid_index_task: Optional[asyncio.Task] = None
+    diagnosis_task: Optional[asyncio.Task] = None
+    full_task: Optional[asyncio.Task] = None
+    paused_from_status: Optional[str] = None
+    resume_mode: Optional[str] = None
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
 
     def __post_init__(self) -> None:
-        # Set = not paused (may proceed); clear = paused (wait).
         if not self.pause_event.is_set():
             self.pause_event.set()
 
+    def lane_state(self) -> dict:
+        return {
+            "checklist_lane_active": self.checklist_task is not None
+            and not self.checklist_task.done(),
+            "bid_index_lane_active": self.bid_index_task is not None
+            and not self.bid_index_task.done(),
+            "diagnosis_lane_active": self.diagnosis_task is not None
+            and not self.diagnosis_task.done(),
+            "full_run_active": self.full_task is not None and not self.full_task.done(),
+        }
+
+    def any_lane_active(self) -> bool:
+        return any(self.lane_state().values())
+
+    def all_tasks(self) -> list[asyncio.Task]:
+        return [
+            t
+            for t in (
+                self.checklist_task,
+                self.bid_index_task,
+                self.diagnosis_task,
+                self.full_task,
+            )
+            if t is not None and not t.done()
+        ]
+
 
 _controls: dict[str, _TaskControl] = {}
+
+
+def get_lane_state(task_id: str) -> dict:
+    ctrl = _controls.get(task_id)
+    if ctrl is None:
+        return {
+            "checklist_lane_active": False,
+            "bid_index_lane_active": False,
+            "full_run_active": False,
+            "diagnosis_lane_active": False,
+        }
+    return ctrl.lane_state()
 
 
 def _get_control(task_id: str) -> _TaskControl:
@@ -131,25 +194,50 @@ def discard_control(task_id: str) -> None:
         return
     ctrl.stop_requested = True
     ctrl.pause_event.set()
-    if ctrl.bg_task is not None and not ctrl.bg_task.done():
-        ctrl.bg_task.cancel()
+    for task in ctrl.all_tasks():
+        task.cancel()
 
 
 async def reset_for_tests() -> None:
     """Clear in-memory scheduler state between tests."""
     tasks = []
     for ctrl in list(_controls.values()):
-        if ctrl.bg_task is not None and not ctrl.bg_task.done():
-            ctrl.stop_requested = True
-            ctrl.pause_event.set()
-            ctrl.bg_task.cancel()
-            tasks.append(ctrl.bg_task)
+        ctrl.stop_requested = True
+        ctrl.pause_event.set()
+        for task in ctrl.all_tasks():
+            task.cancel()
+            tasks.append(task)
     _controls.clear()
     for task in tasks:
         try:
             await task
         except (asyncio.CancelledError, Exception):
             pass
+
+
+async def wait_for_idle(task_id: str, timeout: float = 15.0) -> str:
+    """Poll until task is idle (draft) or reaches a terminal status."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None:
+                raise ValueError(f"task {task_id} not found")
+            ctrl = _controls.get(task_id)
+            lane_active = ctrl.any_lane_active() if ctrl else False
+            if task.status in TERMINAL_STATUSES:
+                return task.status
+            if task.status == IDLE_STATUS and not lane_active:
+                return task.status
+        if loop.time() >= deadline:
+            async with database.SessionLocal() as session:
+                task = await session.get(DiagnosisTask, task_id)
+                status = task.status if task else "missing"
+            raise TimeoutError(
+                f"task {task_id} did not become idle within {timeout}s (status={status})"
+            )
+        await asyncio.sleep(0.05)
 
 
 async def wait_for_terminal(task_id: str, timeout: float = 10.0) -> str:
@@ -174,19 +262,13 @@ async def wait_for_terminal(task_id: str, timeout: float = 10.0) -> str:
 
 
 async def start_task(task_id: str) -> None:
-    """Fire-and-forget: spawn background runner without awaiting the full run."""
-    ctrl = _get_control(task_id)
-    if ctrl.bg_task is not None and not ctrl.bg_task.done():
-        return
-    ctrl.stop_requested = False
-    ctrl.pause_event.set()
-    ctrl.done_event.clear()
-    ctrl.bg_task = asyncio.create_task(_run(task_id))
+    """Backward-compatible alias for full pipeline run."""
+    await start_run_full(task_id)
 
 
 async def retry_checklist(task_id: str) -> DiagnosisTask:
     ctrl = _get_control(task_id)
-    if ctrl.bg_task is not None and not ctrl.bg_task.done():
+    if ctrl.any_lane_active():
         raise SchedulerConflict("task_runner_active")
 
     async with database.SessionLocal() as session:
@@ -222,7 +304,8 @@ async def retry_checklist(task_id: str) -> DiagnosisTask:
     ctrl.stop_requested = False
     ctrl.pause_event.set()
     ctrl.done_event.clear()
-    ctrl.bg_task = asyncio.create_task(_run_checklist_retry(task_id))
+    ctrl.resume_mode = "checklist"
+    ctrl.checklist_task = asyncio.create_task(_run_checklist_retry(task_id))
     return prepared
 
 
@@ -266,15 +349,26 @@ async def pause_task(task_id: str) -> DiagnosisTask:
         task = await session.get(DiagnosisTask, task_id)
         if task is None:
             raise LookupError(task_id)
-        if task.status != "diagnosing":
+        if task.status not in PAUSABLE_STATUSES:
             raise SchedulerConflict(f"cannot pause task in status {task.status}")
+        paused_from = task.status
         task.status = "paused"
         task.updated_at = utcnow()
         await session.commit()
         await session.refresh(task)
         paused = task
 
-    _get_control(task_id).pause_event.clear()
+    ctrl = _get_control(task_id)
+    ctrl.paused_from_status = paused_from
+    if ctrl.full_task is not None and not ctrl.full_task.done():
+        ctrl.resume_mode = "full"
+    elif ctrl.checklist_task is not None and not ctrl.checklist_task.done():
+        ctrl.resume_mode = "checklist"
+    elif ctrl.bid_index_task is not None and not ctrl.bid_index_task.done():
+        ctrl.resume_mode = "bid_index"
+    elif ctrl.diagnosis_task is not None and not ctrl.diagnosis_task.done():
+        ctrl.resume_mode = "diagnosis"
+    ctrl.pause_event.clear()
     await get_tracker(task_id).notify("diagnosis", meta={"paused": True})
     return paused
 
@@ -290,17 +384,23 @@ async def resume_task(task_id: str) -> DiagnosisTask:
             raise LookupError(task_id)
         if task.status != "paused":
             raise SchedulerConflict(f"cannot resume task in status {task.status}")
-        task.status = "diagnosing"
+        restored = ctrl.paused_from_status or IDLE_STATUS
+        task.status = restored
         task.updated_at = utcnow()
         await session.commit()
         await session.refresh(task)
         resumed = task
 
     ctrl.pause_event.set()
-
-    if ctrl.bg_task is None or ctrl.bg_task.done():
-        ctrl.done_event.clear()
-        ctrl.bg_task = asyncio.create_task(_run(task_id))
+    mode = ctrl.resume_mode
+    if mode == "full" and (ctrl.full_task is None or ctrl.full_task.done()):
+        ctrl.full_task = asyncio.create_task(_run_full(task_id))
+    elif mode == "checklist" and (ctrl.checklist_task is None or ctrl.checklist_task.done()):
+        ctrl.checklist_task = asyncio.create_task(_run_checklist_lane(task_id))
+    elif mode == "bid_index" and (ctrl.bid_index_task is None or ctrl.bid_index_task.done()):
+        ctrl.bid_index_task = asyncio.create_task(_run_bid_index_lane(task_id))
+    elif mode == "diagnosis" and (ctrl.diagnosis_task is None or ctrl.diagnosis_task.done()):
+        ctrl.diagnosis_task = asyncio.create_task(_run_diagnosis_lane(task_id))
     return resumed
 
 
@@ -316,7 +416,7 @@ async def stop_task(task_id: str) -> DiagnosisTask:
     ctrl.stop_requested = True
     ctrl.pause_event.set()
 
-    if ctrl.bg_task is None or ctrl.bg_task.done():
+    if not ctrl.any_lane_active():
         async with database.SessionLocal() as session:
             task = await session.get(DiagnosisTask, task_id)
             if task is None:
@@ -441,6 +541,369 @@ async def _handle_checklist_failure(task_id: str, exc: BaseException) -> None:
             task.failure_stage = stage
             task.updated_at = utcnow()
             await session.commit()
+
+
+async def _set_idle(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    if ctrl.any_lane_active():
+        return
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None or task.status in TERMINAL_STATUSES:
+            return
+        if task.status == "paused":
+            return
+        task.status = IDLE_STATUS
+        task.updated_at = utcnow()
+        await session.commit()
+
+
+async def _bid_index_ready_in_session(session, task: DiagnosisTask) -> bool:
+    if not task.bid_file_id:
+        return False
+    result = await session.execute(
+        select(IndexJob)
+        .where(
+            IndexJob.task_id == task.id,
+            IndexJob.file_id == task.bid_file_id,
+        )
+        .order_by(IndexJob.id.desc())
+    )
+    job = result.scalars().first()
+    return job is not None and job.status == "ready"
+
+
+async def _run_interpret_and_checklist(task_id: str, *, stop_at_checklist: bool) -> None:
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None or task.status in TERMINAL_STATUSES:
+            return
+        if task.current_checklist_generation_id is not None:
+            return
+        if task.tender_file_id:
+            await workspace.ensure_file_parse_enqueued(session, task.tender_file_id)
+            await session.commit()
+            await parse_scheduler.kick()
+
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None or task.status in TERMINAL_STATUSES:
+            return
+
+        need_interpret = not task.interpret_md_path
+        if need_interpret and task.status not in ("diagnosing", "paused"):
+            task.status = "interpreting"
+            task.updated_at = utcnow()
+            await session.commit()
+
+        tender_file_id = task.tender_file_id
+        background = task.background or ""
+        requirements = task.requirements or ""
+        need_checklist = task.current_checklist_generation_id is None
+
+    if need_interpret:
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+        if not tender_file_id:
+            await _mark_failed(
+                task_id,
+                "tender_file_id is required for interpretation",
+                "interpreting",
+            )
+            return
+
+        try:
+            provider = _build_tender_content_provider()
+            try:
+                tender_text = await provider.wait_for_markdown(
+                    task_id,
+                    tender_file_id,
+                    stop_requested=lambda: _should_stop(task_id),
+                )
+            except TenderContentStopped:
+                await _mark_stopped(task_id)
+                return
+
+            if _should_stop(task_id):
+                await _mark_stopped(task_id)
+                return
+
+            agent = _build_interpretation_agent()
+            async with get_tracker(task_id).track("interpret"):
+                interpret_result = await agent.interpret(
+                    task_id=task_id,
+                    tender_text=tender_text,
+                    background=background,
+                    requirements=requirements,
+                )
+        except Exception as exc:
+            await _mark_failed(task_id, str(exc)[:240], "interpreting")
+            return
+
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+        md_path, html_path = interpret_report.save_interpret_reports(
+            task_id, interpret_result
+        )
+
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None:
+                return
+            if task.status in TERMINAL_STATUSES:
+                return
+            task.interpret_md_path = md_path
+            task.interpret_html_path = html_path
+            task.status = "generating_checklist"
+            task.updated_at = utcnow()
+            await session.commit()
+
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+    if need_checklist:
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None:
+                return
+            if task.status in TERMINAL_STATUSES:
+                return
+            if task.status not in ("diagnosing", "paused"):
+                task.status = "generating_checklist"
+                task.updated_at = utcnow()
+                await session.commit()
+
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+        try:
+            await wait_for_tender_parse_ready(task_id)
+        except TenderParseBlockedError as exc:
+            await _mark_failed(task_id, str(exc), "tender_parse")
+            return
+
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+        try:
+            async with get_tracker(task_id).track("checklist.generate"):
+                await ChecklistService(
+                    agent=AgentOSChecklistAgent()
+                ).generate_for_task(task_id)
+        except (
+            ChecklistValidationError,
+            ChecklistInputError,
+            TenderParseBlockedError,
+        ) as exc:
+            await _handle_checklist_failure(task_id, exc)
+            return
+        except Exception as exc:
+            await _handle_checklist_failure(task_id, exc)
+            return
+
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+    # Caller (_run_checklist_lane) sets idle after the lane task clears.
+
+
+async def _run_checklist_lane(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    try:
+        await _run_interpret_and_checklist(task_id, stop_at_checklist=True)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        await _handle_checklist_failure(task_id, exc)
+    finally:
+        ctrl.checklist_task = None
+        if ctrl.resume_mode != "full":
+            await _set_idle(task_id)
+
+
+async def _run_bid_index_lane(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    try:
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is None or task.status in TERMINAL_STATUSES:
+                return
+            if await _bid_index_ready_in_session(session, task):
+                return
+            if not task.bid_file_id:
+                await _mark_failed(task_id, "bid_file_missing", "bid_index")
+                return
+            task.status = "indexing_bid"
+            task.updated_at = utcnow()
+            await workspace.ensure_file_parse_enqueued(session, task.bid_file_id)
+            await session.commit()
+            await parse_scheduler.kick()
+
+        await _wait_if_paused(task_id)
+        if _should_stop(task_id):
+            await _mark_stopped(task_id)
+            return
+
+        try:
+            await wait_for_bid_index_ready(task_id)
+        except BidIndexBlockedError as exc:
+            if str(exc) == "task_stopped":
+                await _mark_stopped(task_id)
+            else:
+                await _mark_failed(task_id, str(exc), "bid_index")
+            return
+
+    except asyncio.CancelledError:
+        raise
+    finally:
+        ctrl.bid_index_task = None
+        if ctrl.resume_mode != "full":
+            await _set_idle(task_id)
+
+
+async def _run_diagnosis_lane(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    try:
+        await _complete_from_diagnosis(task_id)
+    finally:
+        ctrl.diagnosis_task = None
+
+
+async def _run_full(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    try:
+        from app.services.task_readiness import compute_task_readiness
+
+        await get_tracker(task_id).notify("start", status="running")
+        readiness = await compute_task_readiness(task_id)
+        if not readiness["checklist_ready"]:
+            if not ctrl.lane_state()["checklist_lane_active"]:
+                ctrl.checklist_task = asyncio.create_task(_run_checklist_lane(task_id))
+        if readiness["bid_index_required"] and not readiness["bid_index_ready"]:
+            if not ctrl.lane_state()["bid_index_lane_active"]:
+                ctrl.bid_index_task = asyncio.create_task(_run_bid_index_lane(task_id))
+
+        to_wait = [
+            t
+            for t in (ctrl.checklist_task, ctrl.bid_index_task)
+            if t is not None and not t.done()
+        ]
+        if to_wait:
+            await asyncio.gather(*to_wait, return_exceptions=True)
+
+        readiness = await compute_task_readiness(task_id)
+        if not readiness["checklist_ready"]:
+            return
+
+        await _complete_from_diagnosis(task_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        async with database.SessionLocal() as session:
+            task = await session.get(DiagnosisTask, task_id)
+            if task is not None and task.status not in TERMINAL_STATUSES:
+                task.status = "failed"
+                task.error_message = str(exc)
+                task.finished_at = utcnow()
+                task.updated_at = utcnow()
+                await session.commit()
+    finally:
+        ctrl.full_task = None
+        ctrl.done_event.set()
+
+
+async def start_generate_checklist(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    if ctrl.lane_state()["checklist_lane_active"]:
+        raise SchedulerConflict("task_lane_active")
+    if ctrl.lane_state()["full_run_active"]:
+        raise SchedulerConflict("task_lane_active")
+
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            raise LookupError(task_id)
+        if task.status in TERMINAL_STATUSES:
+            raise SchedulerConflict("invalid_task_status")
+        if task.current_checklist_generation_id is not None:
+            raise SchedulerConflict("step_already_completed")
+
+    ctrl.stop_requested = False
+    ctrl.pause_event.set()
+    ctrl.resume_mode = "checklist"
+    ctrl.checklist_task = asyncio.create_task(_run_checklist_lane(task_id))
+
+
+async def start_index_bid(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    if ctrl.lane_state()["bid_index_lane_active"]:
+        raise SchedulerConflict("task_lane_active")
+    if ctrl.lane_state()["full_run_active"]:
+        raise SchedulerConflict("task_lane_active")
+
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            raise LookupError(task_id)
+        if task.status in TERMINAL_STATUSES:
+            raise SchedulerConflict("invalid_task_status")
+        if await _bid_index_ready_in_session(session, task):
+            raise SchedulerConflict("step_already_completed")
+
+    ctrl.stop_requested = False
+    ctrl.pause_event.set()
+    ctrl.resume_mode = "bid_index"
+    ctrl.bid_index_task = asyncio.create_task(_run_bid_index_lane(task_id))
+
+
+async def start_diagnose(task_id: str) -> None:
+    from app.services.task_readiness import compute_task_readiness
+
+    ctrl = _get_control(task_id)
+    if ctrl.lane_state()["diagnosis_lane_active"] or ctrl.lane_state()["full_run_active"]:
+        raise SchedulerConflict("task_lane_active")
+
+    readiness = await compute_task_readiness(task_id)
+    if not readiness["checklist_ready"]:
+        raise SchedulerConflict("checklist_not_ready")
+    if readiness["bid_index_required"] and not readiness["bid_index_ready"]:
+        raise SchedulerConflict("bid_index_not_ready")
+
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            raise LookupError(task_id)
+        if task.status in TERMINAL_STATUSES:
+            raise SchedulerConflict("invalid_task_status")
+
+    ctrl.stop_requested = False
+    ctrl.pause_event.set()
+    ctrl.resume_mode = "diagnosis"
+    ctrl.diagnosis_task = asyncio.create_task(_run_diagnosis_lane(task_id))
+
+
+async def start_run_full(task_id: str) -> None:
+    ctrl = _get_control(task_id)
+    if ctrl.lane_state()["full_run_active"]:
+        raise SchedulerConflict("task_lane_active")
+    async with database.SessionLocal() as session:
+        task = await session.get(DiagnosisTask, task_id)
+        if task is None:
+            raise LookupError(task_id)
+        if task.status in TERMINAL_STATUSES:
+            raise SchedulerConflict("invalid_task_status")
+    ctrl.stop_requested = False
+    ctrl.pause_event.set()
+    ctrl.resume_mode = "full"
+    ctrl.done_event.clear()
+    ctrl.full_task = asyncio.create_task(_run_full(task_id))
 
 
 async def _mark_failed(
@@ -634,156 +1097,5 @@ async def _complete_from_diagnosis(task_id: str) -> None:
 
 
 async def _run(task_id: str) -> None:
-    ctrl = _get_control(task_id)
-    try:
-        async with database.SessionLocal() as session:
-            task = await session.get(DiagnosisTask, task_id)
-            if task is None:
-                return
-            if task.status in TERMINAL_STATUSES:
-                return
-
-        await get_tracker(task_id).notify("start", status="running")
-
-        async with database.SessionLocal() as session:
-            task = await session.get(DiagnosisTask, task_id)
-            if task is None:
-                return
-            if task.status in TERMINAL_STATUSES:
-                return
-
-            need_interpret = not task.interpret_md_path
-            if need_interpret and task.status not in ("diagnosing", "paused"):
-                task.status = "interpreting"
-                task.updated_at = utcnow()
-                await session.commit()
-
-            tender_file_id = task.tender_file_id
-            background = task.background or ""
-            requirements = task.requirements or ""
-            need_checklist = task.current_checklist_generation_id is None
-
-        if need_interpret:
-            if _should_stop(task_id):
-                await _mark_stopped(task_id)
-                return
-
-            if not tender_file_id:
-                await _mark_failed(
-                    task_id,
-                    "tender_file_id is required for interpretation",
-                    "interpreting",
-                )
-                return
-
-            try:
-                provider = _build_tender_content_provider()
-                try:
-                    tender_text = await provider.wait_for_markdown(
-                        task_id,
-                        tender_file_id,
-                        stop_requested=lambda: _should_stop(task_id),
-                    )
-                except TenderContentStopped:
-                    await _mark_stopped(task_id)
-                    return
-
-                if _should_stop(task_id):
-                    await _mark_stopped(task_id)
-                    return
-
-                agent = _build_interpretation_agent()
-                async with get_tracker(task_id).track("interpret"):
-                    interpret_result = await agent.interpret(
-                        task_id=task_id,
-                        tender_text=tender_text,
-                        background=background,
-                        requirements=requirements,
-                    )
-            except Exception as exc:
-                await _mark_failed(task_id, str(exc)[:240], "interpreting")
-                return
-
-            if _should_stop(task_id):
-                await _mark_stopped(task_id)
-                return
-            md_path, html_path = interpret_report.save_interpret_reports(
-                task_id, interpret_result
-            )
-
-            async with database.SessionLocal() as session:
-                task = await session.get(DiagnosisTask, task_id)
-                if task is None:
-                    return
-                if task.status in TERMINAL_STATUSES:
-                    return
-                task.interpret_md_path = md_path
-                task.interpret_html_path = html_path
-                task.status = "generating_checklist"
-                task.updated_at = utcnow()
-                await session.commit()
-
-            if _should_stop(task_id):
-                await _mark_stopped(task_id)
-                return
-
-        if need_checklist:
-            async with database.SessionLocal() as session:
-                task = await session.get(DiagnosisTask, task_id)
-                if task is None:
-                    return
-                if task.status in TERMINAL_STATUSES:
-                    return
-                if task.status not in ("diagnosing", "paused"):
-                    task.status = "generating_checklist"
-                    task.updated_at = utcnow()
-                    await session.commit()
-
-            if _should_stop(task_id):
-                await _mark_stopped(task_id)
-                return
-
-            try:
-                await wait_for_tender_parse_ready(task_id)
-            except TenderParseBlockedError as exc:
-                await _mark_failed(task_id, str(exc), "tender_parse")
-                return
-
-            if _should_stop(task_id):
-                await _mark_stopped(task_id)
-                return
-
-            try:
-                async with get_tracker(task_id).track("checklist.generate"):
-                    await ChecklistService(
-                        agent=AgentOSChecklistAgent()
-                    ).generate_for_task(task_id)
-            except (
-                ChecklistValidationError,
-                ChecklistInputError,
-                TenderParseBlockedError,
-            ) as exc:
-                await _handle_checklist_failure(task_id, exc)
-                return
-            except Exception as exc:
-                await _handle_checklist_failure(task_id, exc)
-                return
-
-            if _should_stop(task_id):
-                await _mark_stopped(task_id)
-                return
-
-        await _complete_from_diagnosis(task_id)
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        async with database.SessionLocal() as session:
-            task = await session.get(DiagnosisTask, task_id)
-            if task is not None and task.status not in TERMINAL_STATUSES:
-                task.status = "failed"
-                task.error_message = str(exc)
-                task.finished_at = utcnow()
-                task.updated_at = utcnow()
-                await session.commit()
-    finally:
-        ctrl.done_event.set()
+    """Deprecated alias kept for internal references."""
+    await _run_full(task_id)

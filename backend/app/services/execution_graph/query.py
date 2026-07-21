@@ -29,21 +29,23 @@ def _parse_meta(raw: str) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _ensure_utc(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _live_duration_ms(started_at) -> int:
     now = utcnow()
-    started = started_at
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
+    started = _ensure_utc(started_at)
     return max(0, int((now - started).total_seconds() * 1000))
 
 
 def _duration_between(started_at, ended_at) -> int:
-    started = started_at
-    ended = ended_at
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
-    if ended.tzinfo is None:
-        ended = ended.replace(tzinfo=timezone.utc)
+    started = _ensure_utc(started_at)
+    ended = _ensure_utc(ended_at)
     return max(0, int((ended - started).total_seconds() * 1000))
 
 
@@ -76,8 +78,10 @@ def _rollup_container_times(
     children: list[ExecutionNode],
     rolled_status: str,
 ) -> tuple:
-    started_times = [c.started_at for c in children if c.started_at is not None]
-    ended_times = [c.ended_at for c in children if c.ended_at is not None]
+    started_times = [
+        _ensure_utc(c.started_at) for c in children if c.started_at is not None
+    ]
+    ended_times = [_ensure_utc(c.ended_at) for c in children if c.ended_at is not None]
     started_at = min(started_times) if started_times else None
     ended_at = max(ended_times) if ended_times else None
 

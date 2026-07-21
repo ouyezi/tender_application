@@ -129,7 +129,7 @@ async def _seed_configs(client: AsyncClient, n: int = 2) -> None:
         assert r.status_code == 201
 
 
-async def _create_task(client: AsyncClient) -> dict:
+async def _create_task(client: AsyncClient, *, run_full: bool = True) -> dict:
     files = {
         "tender_file": ("tender.pdf", io.BytesIO(_pdf_bytes()), "application/pdf"),
         "bid_file": (
@@ -144,7 +144,11 @@ async def _create_task(client: AsyncClient) -> dict:
         files=files,
     )
     assert r.status_code == 201
-    return r.json()
+    body = r.json()
+    if run_full:
+        r2 = await client.post(f"/api/tasks/{body['id']}/actions/run-full")
+        assert r2.status_code == 202
+    return body
 
 
 @pytest.mark.asyncio

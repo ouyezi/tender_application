@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { reportDocxUrl } from '../api'
 
 const STATUS_LABELS = {
+  draft: '待执行',
   interpreting: '解读中',
   generating_checklist: '生成检查项',
+  indexing_bid: '标书索引中',
   diagnosing: '诊断中',
   running: '诊断中',
   paused: '已暂停',

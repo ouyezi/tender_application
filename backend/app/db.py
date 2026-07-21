@@ -152,6 +152,7 @@ async def recover_interrupted_tasks() -> None:
                     [
                         "interpreting",
                         "generating_checklist",
+                        "indexing_bid",
                         "diagnosing",
                         "running",
                         "paused",

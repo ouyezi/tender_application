@@ -76,6 +76,26 @@ export function fileUrl(id, kind) {
   return `/api/tasks/${id}/files/${kind}`
 }
 
+export function getTaskReadiness(id) {
+  return request(`/api/tasks/${id}/readiness`)
+}
+
+export function generateChecklist(id) {
+  return request(`/api/tasks/${id}/actions/generate-checklist`, { method: 'POST' })
+}
+
+export function indexBid(id) {
+  return request(`/api/tasks/${id}/actions/index-bid`, { method: 'POST' })
+}
+
+export function runDiagnosis(id) {
+  return request(`/api/tasks/${id}/actions/diagnose`, { method: 'POST' })
+}
+
+export function runFullDiagnosis(id) {
+  return request(`/api/tasks/${id}/actions/run-full`, { method: 'POST' })
+}
+
 export function listWorkspaces() {
   return request('/api/workspaces')
 }

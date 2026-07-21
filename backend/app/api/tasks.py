@@ -13,8 +13,9 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
-from app.schemas import ChecklistReportOut, ExecutionGraphOut, TaskListOut, TaskOut
+from app.schemas import ChecklistReportOut, ExecutionGraphOut, TaskListOut, TaskOut, TaskReadinessOut
 from app.services import checklist_service, files, scheduler, task_delete, workspace
+from app.services.task_readiness import compute_task_readiness
 from app.services.execution_graph import get_tracker
 from app.services.execution_graph.query import build_execution_graph_response
 from app.services.checklist_service import (
@@ -171,11 +172,7 @@ async def get_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut:
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return _task_to_out(
-        task,
-        report_markdown=_read_report_markdown(task),
-        interpret_markdown=_read_interpret_markdown(task),
-    )
+    return await _load_task_out_with_readiness(db, task_id)
 
 
 @router.get("/{task_id}/checklist", response_model=ChecklistReportOut)
@@ -217,6 +214,14 @@ async def retry_checklist(task_id: str) -> dict[str, str]:
     return {"task_id": task_id, "status": "generating_checklist"}
 
 
+async def _load_task_out_with_readiness(db: AsyncSession, task_id: str) -> TaskOut:
+    out = await _load_task_out(db, task_id)
+    readiness = await compute_task_readiness(task_id)
+    payload = out.model_dump()
+    payload["readiness"] = readiness
+    return TaskOut.model_validate(payload)
+
+
 async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
     result = await db.execute(
         select(DiagnosisTask)
@@ -231,6 +236,64 @@ async def _load_task_out(db: AsyncSession, task_id: str) -> TaskOut:
         report_markdown=_read_report_markdown(task),
         interpret_markdown=_read_interpret_markdown(task),
     )
+
+
+@router.get("/{task_id}/readiness", response_model=TaskReadinessOut)
+async def get_task_readiness(
+    task_id: str, db: AsyncSession = Depends(get_db)
+) -> TaskReadinessOut:
+    task = await db.get(DiagnosisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    return TaskReadinessOut.model_validate(await compute_task_readiness(task_id))
+
+
+def _action_response(task_id: str, status_value: str) -> dict:
+    return {"task_id": task_id, "status": status_value}
+
+
+@router.post("/{task_id}/actions/generate-checklist", status_code=status.HTTP_202_ACCEPTED)
+async def action_generate_checklist(task_id: str) -> dict:
+    try:
+        await scheduler.start_generate_checklist(task_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    except SchedulerConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return _action_response(task_id, "generating_checklist")
+
+
+@router.post("/{task_id}/actions/index-bid", status_code=status.HTTP_202_ACCEPTED)
+async def action_index_bid(task_id: str) -> dict:
+    try:
+        await scheduler.start_index_bid(task_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    except SchedulerConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return _action_response(task_id, "indexing_bid")
+
+
+@router.post("/{task_id}/actions/diagnose", status_code=status.HTTP_202_ACCEPTED)
+async def action_diagnose(task_id: str) -> dict:
+    try:
+        await scheduler.start_diagnose(task_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    except SchedulerConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return _action_response(task_id, "diagnosing")
+
+
+@router.post("/{task_id}/actions/run-full", status_code=status.HTTP_202_ACCEPTED)
+async def action_run_full(task_id: str) -> dict:
+    try:
+        await scheduler.start_run_full(task_id)
+    except LookupError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    except SchedulerConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return _action_response(task_id, "running")
 
 
 @router.get("/{task_id}/execution-graph", response_model=ExecutionGraphOut)
@@ -305,7 +368,7 @@ async def pause_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOu
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     except SchedulerConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-    return await _load_task_out(db, task_id)
+    return await _load_task_out_with_readiness(db, task_id)
 
 
 @router.post("/{task_id}/resume", response_model=TaskOut)
@@ -316,7 +379,7 @@ async def resume_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskO
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     except SchedulerConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-    return await _load_task_out(db, task_id)
+    return await _load_task_out_with_readiness(db, task_id)
 
 
 @router.post("/{task_id}/stop", response_model=TaskOut)
@@ -327,7 +390,7 @@ async def stop_task(task_id: str, db: AsyncSession = Depends(get_db)) -> TaskOut
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     except SchedulerConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-    return await _load_task_out(db, task_id)
+    return await _load_task_out_with_readiness(db, task_id)
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

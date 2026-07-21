@@ -1,13 +1,26 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { fileUrl, getTask, interpretHtmlUrl, reportDocxUrl } from '../api'
+import {
+  fileUrl,
+  generateChecklist,
+  getTask,
+  indexBid,
+  interpretHtmlUrl,
+  pauseTask,
+  reportDocxUrl,
+  resumeTask,
+  runDiagnosis,
+  runFullDiagnosis,
+} from '../api'
 import ChecklistReport from '../components/ChecklistReport'
 import MarkdownPreview from '../components/MarkdownPreview'
 import ResultTable from '../components/ResultTable'
 
 const STATUS_LABELS = {
+  draft: '待执行',
   interpreting: '解读中',
   generating_checklist: '生成检查项',
+  indexing_bid: '标书索引中',
   diagnosing: '诊断中',
   running: '诊断中', // legacy
   paused: '已暂停',
@@ -17,8 +30,10 @@ const STATUS_LABELS = {
 }
 
 const POLL_STATUSES = new Set([
+  'draft',
   'interpreting',
   'generating_checklist',
+  'indexing_bid',
   'diagnosing',
   'running',
   'paused',
@@ -29,6 +44,8 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [actionLoading, setActionLoading] = useState('')
   const [reportTab, setReportTab] = useState('interpret')
 
   const load = useCallback(
@@ -53,10 +70,32 @@ export default function TaskDetailPage() {
   }, [load])
 
   useEffect(() => {
-    if (!task || !POLL_STATUSES.has(task.status)) return undefined
+    if (!task) return undefined
+    const readiness = task.readiness || {}
+    const laneActive =
+      readiness.checklist_lane_active ||
+      readiness.bid_index_lane_active ||
+      readiness.diagnosis_lane_active ||
+      readiness.full_run_active
+    const shouldPoll =
+      POLL_STATUSES.has(task.status) && (task.status !== 'draft' || laneActive)
+    if (!shouldPoll) return undefined
     const timer = setInterval(() => load(true), 2000)
     return () => clearInterval(timer)
-  }, [task?.status, load])
+  }, [task?.status, task?.readiness, load])
+
+  async function runAction(key, fn) {
+    setActionError('')
+    setActionLoading(key)
+    try {
+      await fn(id)
+      await load(true)
+    } catch (err) {
+      setActionError(err.message || '操作失败')
+    } finally {
+      setActionLoading('')
+    }
+  }
 
   if (loading && !task) {
     return (
@@ -92,6 +131,35 @@ export default function TaskDetailPage() {
   const label = STATUS_LABELS[status] || status
   const results = task.results || []
   const canDownloadInterpret = Boolean(task.interpret_html_path || task.interpret_markdown)
+  const readiness = task.readiness || {}
+  const terminal = new Set(['completed', 'stopped', 'failed'])
+  const isTerminal = terminal.has(status)
+  const isPaused = status === 'paused'
+  const isRunning = !isTerminal && !isPaused && status !== 'draft'
+
+  const canGenerateChecklist =
+    !isTerminal &&
+    !readiness.checklist_ready &&
+    !readiness.checklist_lane_active &&
+    !readiness.full_run_active
+
+  const canIndexBid =
+    !isTerminal &&
+    !readiness.bid_index_ready &&
+    !readiness.bid_index_lane_active &&
+    !readiness.full_run_active
+
+  const canDiagnose =
+    !isTerminal &&
+    readiness.diagnosis_ready &&
+    status !== 'completed' &&
+    !readiness.diagnosis_lane_active &&
+    !readiness.full_run_active
+
+  const canRunFull = !isTerminal && !readiness.full_run_active
+
+  const canPause = isRunning
+  const canResume = isPaused
 
   return (
     <main className="page task-detail-page">
@@ -159,6 +227,105 @@ export default function TaskDetailPage() {
             <p>{task.requirements || '—'}</p>
           </div>
         </div>
+
+        <div className="detail-step-bar">
+          <div className={`detail-step${readiness.checklist_ready ? ' is-done' : ''}`}>
+            <span className="detail-step-dot" />
+            <span className="detail-step-title">诊断项</span>
+            <span className="detail-step-status">
+              {readiness.checklist_lane_active
+                ? '生成中'
+                : readiness.checklist_ready
+                  ? '已生成'
+                  : '待执行'}
+            </span>
+          </div>
+          <div className={`detail-step${readiness.bid_index_ready ? ' is-done' : ''}`}>
+            <span className="detail-step-dot" />
+            <span className="detail-step-title">标书索引</span>
+            <span className="detail-step-status">
+              {readiness.bid_index_lane_active || status === 'indexing_bid'
+                ? '索引中'
+                : readiness.bid_index_ready
+                  ? '已就绪'
+                  : readiness.bid_index_required
+                    ? '待执行'
+                    : '无需索引'}
+            </span>
+          </div>
+          <div className={`detail-step${status === 'completed' ? ' is-done' : ''}`}>
+            <span className="detail-step-dot" />
+            <span className="detail-step-title">诊断</span>
+            <span className="detail-step-status">
+              {status === 'completed'
+                ? '已完成'
+                : readiness.diagnosis_lane_active || status === 'diagnosing'
+                  ? '诊断中'
+                  : '待执行'}
+            </span>
+          </div>
+        </div>
+
+        <div className="detail-actions">
+          <div className="detail-actions-group">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!canGenerateChecklist || Boolean(actionLoading)}
+              onClick={() => runAction('checklist', () => generateChecklist(id))}
+            >
+              {actionLoading === 'checklist' ? '生成中…' : '生成诊断项'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!canIndexBid || Boolean(actionLoading)}
+              onClick={() => runAction('index', () => indexBid(id))}
+            >
+              {actionLoading === 'index' ? '索引中…' : '标书索引'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!canDiagnose || Boolean(actionLoading)}
+              onClick={() => runAction('diagnose', () => runDiagnosis(id))}
+            >
+              {actionLoading === 'diagnose' ? '诊断中…' : '诊断'}
+            </button>
+          </div>
+          <div className="detail-actions-group">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canRunFull || Boolean(actionLoading)}
+              onClick={() => runAction('full', () => runFullDiagnosis(id))}
+            >
+              {actionLoading === 'full' ? '执行中…' : '一键诊断'}
+            </button>
+            {canPause && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={Boolean(actionLoading)}
+                onClick={() => runAction('pause', () => pauseTask(id))}
+              >
+                暂停
+              </button>
+            )}
+            {canResume && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={Boolean(actionLoading)}
+                onClick={() => runAction('resume', () => resumeTask(id))}
+              >
+                继续
+              </button>
+            )}
+          </div>
+        </div>
+        {actionError && <p className="page-error">{actionError}</p>}
+
         {task.progress_total > 0 && (
           <p className="detail-progress">
             进度：{task.progress_done}/{task.progress_total}

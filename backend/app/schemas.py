@@ -121,6 +121,17 @@ class ChecklistSummaryOut(BaseModel):
     importance_counts: dict[str, int]
 
 
+class TaskReadinessOut(BaseModel):
+    checklist_ready: bool
+    bid_index_ready: bool
+    bid_index_required: bool
+    diagnosis_ready: bool
+    checklist_lane_active: bool
+    bid_index_lane_active: bool
+    full_run_active: bool
+    diagnosis_lane_active: bool
+
+
 class ChecklistReportOut(BaseModel):
     generation: ChecklistGenerationOut
     summary: ChecklistSummaryOut
@@ -156,6 +167,7 @@ class TaskOut(TaskListOut):
     results: List[ResultOut] = []
     report_markdown: str = ""
     interpret_markdown: str = ""
+    readiness: Optional[TaskReadinessOut] = None
 
 
 class WorkspaceFileOut(BaseModel):

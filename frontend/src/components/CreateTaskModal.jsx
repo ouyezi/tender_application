@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { createTask } from '../api'
+import { createTask, runFullDiagnosis } from '../api'
 
 export default function CreateTaskModal({ open, onClose, onCreated }) {
   const [tenderFile, setTenderFile] = useState(null)
   const [bidFile, setBidFile] = useState(null)
   const [background, setBackground] = useState('')
   const [requirements, setRequirements] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [submitting, setSubmitting] = useState('')
   const [error, setError] = useState('')
 
   if (!open) return null
@@ -17,7 +17,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
     setBackground('')
     setRequirements('')
     setError('')
-    setSubmitting(false)
+    setSubmitting('')
   }
 
   function handleClose() {
@@ -26,8 +26,7 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
     onClose?.()
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
+  async function handleCreate(runFull) {
     setError('')
 
     if (!tenderFile) {
@@ -45,15 +44,18 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
     formData.append('background', background)
     formData.append('requirements', requirements)
 
-    setSubmitting(true)
+    setSubmitting(runFull ? 'full' : 'draft')
     try {
       const task = await createTask(formData)
+      if (runFull && task?.id) {
+        await runFullDiagnosis(task.id)
+      }
       resetForm()
       onClose?.()
       onCreated?.(task)
     } catch (err) {
       setError(err.message || '创建失败，请重试')
-      setSubmitting(false)
+      setSubmitting('')
     }
   }
 
@@ -72,14 +74,20 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
             type="button"
             className="modal-close"
             onClick={handleClose}
-            disabled={submitting}
+            disabled={Boolean(submitting)}
             aria-label="关闭"
           >
             ×
           </button>
         </header>
 
-        <form className="modal-form" onSubmit={handleSubmit}>
+        <form
+          className="modal-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            handleCreate(true)
+          }}
+        >
           <label className="field">
             <span>招标文件</span>
             <input
@@ -127,12 +135,20 @@ export default function CreateTaskModal({ open, onClose, onCreated }) {
               type="button"
               className="btn btn-secondary"
               onClick={handleClose}
-              disabled={submitting}
+              disabled={Boolean(submitting)}
             >
               取消
             </button>
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? '提交中…' : '开始诊断'}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={Boolean(submitting)}
+              onClick={() => handleCreate(false)}
+            >
+              {submitting === 'draft' ? '创建中…' : '创建'}
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={Boolean(submitting)}>
+              {submitting === 'full' ? '提交中…' : '开始诊断'}
             </button>
           </div>
         </form>
