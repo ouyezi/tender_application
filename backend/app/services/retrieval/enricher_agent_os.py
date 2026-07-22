@@ -158,6 +158,52 @@ def _parse_enrich_rows(payload: dict[str, object]) -> list[dict[str, object]]:
     return [row for row in rows if isinstance(row, dict)]
 
 
+def _collect_raw_labels(segment: SegmentDraft, catalog: list[dict]) -> list[str]:
+    raw_labels = list(segment.title_path)
+    haystack = segment.text
+    for row in catalog:
+        name = row.get("name")
+        if not isinstance(name, str):
+            continue
+        if name in haystack:
+            raw_labels.append(name)
+        for alias in row.get("aliases") or []:
+            if isinstance(alias, str) and alias in haystack:
+                raw_labels.append(alias)
+    return raw_labels
+
+
+def _fallback_enrich(seg: SegmentDraft, catalog: list[dict]) -> None:
+    from app.services.retrieval.tags import map_to_controlled_tags
+
+    if seg.title_path and not seg.title:
+        seg.title = seg.title_path[-1]
+    text = seg.text.strip()
+    seg.summary = text[:120] if text else (seg.title or seg.chunk_id)
+    seg.description = " / ".join(seg.title_path) if seg.title_path else ""
+    seg.tags = map_to_controlled_tags(
+        _collect_raw_labels(seg, catalog),
+        catalog=catalog,
+    )
+
+
+def _apply_enrich_row(
+    seg: SegmentDraft,
+    row: dict[str, object],
+    alias_to_canonical: dict[str, str],
+) -> None:
+    title = row.get("title")
+    summary = row.get("summary")
+    description = row.get("description")
+    if isinstance(title, str):
+        seg.title = title
+    if isinstance(summary, str):
+        seg.summary = summary
+    if isinstance(description, str):
+        seg.description = description
+    seg.tags = _filter_tags(row.get("tags"), alias_to_canonical)
+
+
 class AgentOSChunkEnricher:
     def __init__(
         self,
@@ -182,6 +228,41 @@ class AgentOSChunkEnricher:
         client = self._client or AgentOSClient()
         return await client.invoke_app(self.app_name, input_data)
 
+    async def _invoke_batch(
+        self,
+        *,
+        task_id: str,
+        catalog_json: str,
+        batch_index: int,
+        total_batches: int,
+        layer: str,
+        batch_dicts: list[dict[str, object]],
+    ) -> dict[str, dict[str, object]]:
+        approx_chars = _batch_char_size(batch_dicts)
+        try:
+            payload = await self._invoke(
+                {
+                    "task_id": task_id,
+                    "catalog_json": catalog_json,
+                    "segments_json": json.dumps(batch_dicts, ensure_ascii=False),
+                }
+            )
+        except ChunkEnrichResponseError:
+            raise
+        except Exception as exc:
+            raise ChunkEnrichResponseError(
+                f"enrich batch {batch_index}/{total_batches} failed "
+                f"({layer}, {len(batch_dicts)} segments, "
+                f"~{approx_chars} chars): {exc}"
+            ) from exc
+
+        rows: dict[str, dict[str, object]] = {}
+        for row in _parse_enrich_rows(payload):
+            chunk_id = row.get("chunk_id")
+            if isinstance(chunk_id, str):
+                rows[chunk_id] = row
+        return rows
+
     async def enrich_many(
         self,
         *,
@@ -203,47 +284,45 @@ class AgentOSChunkEnricher:
         by_id: dict[str, dict[str, object]] = {}
 
         for batch_index, (layer, batch_dicts) in enumerate(batches, start=1):
-            approx_chars = _batch_char_size(batch_dicts)
-            try:
-                payload = await self._invoke(
-                    {
-                        "task_id": task_id,
-                        "catalog_json": catalog_json,
-                        "segments_json": json.dumps(
-                            batch_dicts, ensure_ascii=False
-                        ),
-                    }
+            by_id.update(
+                await self._invoke_batch(
+                    task_id=task_id,
+                    catalog_json=catalog_json,
+                    batch_index=batch_index,
+                    total_batches=total_batches,
+                    layer=layer,
+                    batch_dicts=batch_dicts,
                 )
-                for row in _parse_enrich_rows(payload):
-                    chunk_id = row.get("chunk_id")
-                    if isinstance(chunk_id, str):
-                        by_id[chunk_id] = row
-            except ChunkEnrichResponseError:
-                raise
-            except Exception as exc:
-                raise ChunkEnrichResponseError(
-                    f"enrich batch {batch_index}/{total_batches} failed "
-                    f"({layer}, {len(batch_dicts)} segments, "
-                    f"~{approx_chars} chars): {exc}"
-                ) from exc
+            )
+
+        missing = [seg for seg in segments if seg.chunk_id not in by_id]
+        if missing:
+            retry_batches = _build_enrich_batches(
+                missing,
+                max_chars=self._max_batch_chars,
+                max_segments=1,
+                max_large_text_chars=self._max_large_text_chars,
+            )
+            retry_total = len(retry_batches)
+            for retry_index, (layer, batch_dicts) in enumerate(retry_batches, start=1):
+                by_id.update(
+                    await self._invoke_batch(
+                        task_id=task_id,
+                        catalog_json=catalog_json,
+                        batch_index=retry_index,
+                        total_batches=retry_total,
+                        layer=f"retry-{layer}",
+                        batch_dicts=batch_dicts,
+                    )
+                )
 
         alias_to_canonical = _build_alias_to_canonical(catalog)
 
         for seg in segments:
             row = by_id.get(seg.chunk_id)
             if row is None:
-                raise ChunkEnrichResponseError(
-                    f"missing enrichment for chunk_id {seg.chunk_id}"
-                )
-            title = row.get("title")
-            summary = row.get("summary")
-            description = row.get("description")
-            if isinstance(title, str):
-                seg.title = title
-            if isinstance(summary, str):
-                seg.summary = summary
-            if isinstance(description, str):
-                seg.description = description
-            seg.tags = _filter_tags(row.get("tags"), alias_to_canonical)
+                _fallback_enrich(seg, catalog)
+                continue
+            _apply_enrich_row(seg, row, alias_to_canonical)
 
         return segments

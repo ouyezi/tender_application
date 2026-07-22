@@ -98,16 +98,55 @@ async def test_enrich_drops_illegal_tag_names():
 
 
 @pytest.mark.asyncio
-async def test_enrich_missing_chunk_raises():
+async def test_enrich_missing_chunk_uses_fallback():
     async def fake_invoke(app_name, input_data):
         del app_name, input_data
         return {"segments_json": json.dumps([])}
 
     enricher = AgentOSChunkEnricher(invoke_app=fake_invoke)
-    with pytest.raises(ChunkEnrichResponseError):
-        await enricher.enrich_many(
-            task_id="T1", segments=[_seg("c1")], catalog=[]
-        )
+    out = await enricher.enrich_many(
+        task_id="T1",
+        segments=[_seg("c1", text="授权证书样本")],
+        catalog=[{"name": "授权证书", "aliases": []}],
+    )
+    assert out[0].title == "节"
+    assert out[0].summary == "授权证书样本"
+    assert out[0].tags == [{"name": "授权证书", "confidence": 0.8}]
+
+
+@pytest.mark.asyncio
+async def test_enrich_retries_missing_chunks_one_by_one():
+    calls: list[int] = []
+
+    async def fake_invoke(app_name, input_data):
+        del app_name
+        segs = json.loads(input_data["segments_json"])
+        calls.append(len(segs))
+        if len(segs) > 1:
+            return {
+                "segments_json": json.dumps(
+                    [_enrich_row(segs[0]["chunk_id"])],
+                    ensure_ascii=False,
+                )
+            }
+        return {
+            "segments_json": json.dumps(
+                [_enrich_row(segs[0]["chunk_id"])],
+                ensure_ascii=False,
+            )
+        }
+
+    segments = [_seg("c1"), _seg("c2")]
+    enricher = AgentOSChunkEnricher(
+        invoke_app=fake_invoke,
+        max_batch_chars=10_000,
+        max_batch_segments=5,
+    )
+    out = await enricher.enrich_many(task_id="T1", segments=segments, catalog=[])
+    assert {seg.chunk_id for seg in out} == {"c1", "c2"}
+    assert out[0].title == "t"
+    assert out[1].title == "t"
+    assert calls == [2, 1]
 
 
 @pytest.mark.asyncio

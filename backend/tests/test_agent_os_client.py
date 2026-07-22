@@ -79,19 +79,47 @@ def test_load_settings_parse_wait_timeout(tmp_path, monkeypatch):
         json.dumps(
             {
                 "agentOs": {"baseUrl": "http://localhost:8000"},
-                "tenderInterpretation": {"parseWaitTimeoutSeconds": 600},
+                "tenderInterpretation": {
+                    "parseWaitTimeoutSeconds": 600,
+                    "invokeTimeoutSeconds": 900,
+                },
             }
         ),
         encoding="utf-8",
     )
     monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", cfg)
     monkeypatch.delenv("TENDER_PARSE_WAIT_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("TENDER_INTERPRET_INVOKE_TIMEOUT_SECONDS", raising=False)
     settings = agent_os.load_settings()
     assert settings.parse_wait_timeout_seconds == 600.0
+    assert settings.interpret_invoke_timeout_seconds == 900.0
 
     monkeypatch.setenv("TENDER_PARSE_WAIT_TIMEOUT_SECONDS", "100")
+    monkeypatch.setenv("TENDER_INTERPRET_INVOKE_TIMEOUT_SECONDS", "1200")
     settings = agent_os.load_settings()
     assert settings.parse_wait_timeout_seconds == 100.0
+    assert settings.interpret_invoke_timeout_seconds == 1200.0
+
+
+def test_load_settings_checklist_invoke_timeout(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.local.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "agentOs": {"baseUrl": "http://localhost:8000"},
+                "tenderChecklist": {"invokeTimeoutSeconds": 900},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", cfg)
+    monkeypatch.delenv("TENDER_CHECKLIST_INVOKE_TIMEOUT_SECONDS", raising=False)
+    settings = agent_os.load_settings()
+    assert settings.checklist_invoke_timeout_seconds == 900.0
+
+    monkeypatch.setenv("TENDER_CHECKLIST_INVOKE_TIMEOUT_SECONDS", "1200")
+    settings = agent_os.load_settings()
+    assert settings.checklist_invoke_timeout_seconds == 1200.0
 
 
 def test_load_settings_batch_diagnosis_index_wait_timeout(tmp_path, monkeypatch):

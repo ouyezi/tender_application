@@ -10,7 +10,11 @@
     }
   },
   "tenderInterpretation": {
-    "parseWaitTimeoutSeconds": 1800
+    "parseWaitTimeoutSeconds": 1800,
+    "invokeTimeoutSeconds": 1200
+  },
+  "tenderChecklist": {
+    "invokeTimeoutSeconds": 600
   },
   "batchDiagnosis": {
     "indexWaitTimeoutSeconds": 7200

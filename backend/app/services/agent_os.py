@@ -26,6 +26,8 @@ class AgentOSSettings:
     auth_header_name: str = ""
     auth_header_value: str = ""
     parse_wait_timeout_seconds: float = 1800.0
+    interpret_invoke_timeout_seconds: float = 1200.0
+    checklist_invoke_timeout_seconds: float = 600.0
     batch_diagnosis_index_wait_timeout_seconds: float = 7200.0
 
 
@@ -100,6 +102,11 @@ def load_settings(path: Optional[Path] = None) -> AgentOSSettings:
         if isinstance(local.get("batchDiagnosis"), dict)
         else {}
     )
+    tender_checklist = (
+        local.get("tenderChecklist")
+        if isinstance(local.get("tenderChecklist"), dict)
+        else {}
+    )
     return AgentOSSettings(
         base_url=str(_env_or(agent_os.get("baseUrl"), "AGENT_OS_BASE_URL", "")).rstrip(
             "/"
@@ -126,6 +133,22 @@ def load_settings(path: Optional[Path] = None) -> AgentOSSettings:
                 1800,
             ),
             1800.0,
+        ),
+        interpret_invoke_timeout_seconds=_as_float(
+            _env_or(
+                tender_interp.get("invokeTimeoutSeconds"),
+                "TENDER_INTERPRET_INVOKE_TIMEOUT_SECONDS",
+                1200,
+            ),
+            1200.0,
+        ),
+        checklist_invoke_timeout_seconds=_as_float(
+            _env_or(
+                tender_checklist.get("invokeTimeoutSeconds"),
+                "TENDER_CHECKLIST_INVOKE_TIMEOUT_SECONDS",
+                600,
+            ),
+            600.0,
         ),
         batch_diagnosis_index_wait_timeout_seconds=_as_float(
             _env_or(

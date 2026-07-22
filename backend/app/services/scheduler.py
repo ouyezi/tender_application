@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 from app import db as database
@@ -120,7 +120,21 @@ def _build_tender_content_provider() -> TenderContentProvider:
 
 
 def _build_interpretation_agent() -> AgentOSInterpretationAgent:
-    return AgentOSInterpretationAgent(AgentOSClient())
+    settings = load_settings()
+    interpret_settings = replace(
+        settings,
+        timeout_seconds=settings.interpret_invoke_timeout_seconds,
+    )
+    return AgentOSInterpretationAgent(AgentOSClient(settings=interpret_settings))
+
+
+def _build_checklist_agent() -> AgentOSChecklistAgent:
+    settings = load_settings()
+    checklist_settings = replace(
+        settings,
+        timeout_seconds=settings.checklist_invoke_timeout_seconds,
+    )
+    return AgentOSChecklistAgent(client=AgentOSClient(settings=checklist_settings))
 
 
 @dataclass
@@ -316,7 +330,7 @@ async def _run_checklist_retry(task_id: str) -> None:
             await _mark_stopped(task_id)
             return
 
-        await ChecklistService(agent=AgentOSChecklistAgent()).generate_for_task(task_id)
+        await ChecklistService(agent=_build_checklist_agent()).generate_for_task(task_id)
 
         if _should_stop(task_id):
             await _mark_stopped(task_id)
@@ -694,7 +708,7 @@ async def _run_interpret_and_checklist(task_id: str, *, stop_at_checklist: bool)
         try:
             async with get_tracker(task_id).track("checklist.generate"):
                 await ChecklistService(
-                    agent=AgentOSChecklistAgent()
+                    agent=_build_checklist_agent()
                 ).generate_for_task(task_id)
         except (
             ChecklistValidationError,
