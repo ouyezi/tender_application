@@ -8,20 +8,6 @@ const IMPORTANCE_LABELS = {
   low: '低',
 }
 
-const COMPLIANCE_RULE_LABELS = {
-  satisfied: '满足',
-  violated: '违反',
-  cannot_satisfy: '不能满足',
-  insufficient_evidence: '证据不足',
-}
-
-const CONSEQUENCE_RULE_LABELS = {
-  no_score: '不得分',
-  bid_unusable: '投标无效',
-  score_risk: '得分风险',
-  general_risk: '一般风险',
-}
-
 function parseApiDetail(message) {
   if (!message) return ''
   try {
@@ -31,13 +17,6 @@ function parseApiDetail(message) {
     // not JSON
   }
   return message
-}
-
-function formatRules(rules, labels) {
-  if (!rules || typeof rules !== 'object') return '—'
-  const entries = Object.entries(rules)
-  if (entries.length === 0) return '—'
-  return entries.map(([key, value]) => `${labels[key] || key}：${value}`).join('；')
 }
 
 function formatJson(value) {
@@ -238,7 +217,7 @@ export default function ChecklistReport({
                             <div className="checklist-expand">
                               <div className="checklist-expand-block">
                                 <span className="checklist-expand-label">来源引用</span>
-                                <pre>{formatJson(item.source_references)}</pre>
+                                <pre className="checklist-md">{item.source_citations || '—'}</pre>
                               </div>
                               <div className="checklist-expand-block">
                                 <span className="checklist-expand-label">检索提示</span>
@@ -246,25 +225,15 @@ export default function ChecklistReport({
                               </div>
                               <div className="checklist-expand-block">
                                 <span className="checklist-expand-label">预期证据</span>
-                                <pre>{formatJson(item.expected_evidence)}</pre>
+                                <pre className="checklist-md">{item.expected_evidence || '—'}</pre>
                               </div>
                               <div className="checklist-expand-block">
                                 <span className="checklist-expand-label">符合性规则</span>
-                                <p>
-                                  {formatRules(
-                                    item.compliance_rules,
-                                    COMPLIANCE_RULE_LABELS,
-                                  )}
-                                </p>
+                                <pre className="checklist-md">{item.compliance_rules || '—'}</pre>
                               </div>
                               <div className="checklist-expand-block">
                                 <span className="checklist-expand-label">后果规则</span>
-                                <p>
-                                  {formatRules(
-                                    item.consequence_rules,
-                                    CONSEQUENCE_RULE_LABELS,
-                                  )}
-                                </p>
+                                <pre className="checklist-md">{item.consequence_rules || '—'}</pre>
                               </div>
                               <div className="checklist-expand-block">
                                 <span className="checklist-expand-label">管理配置引用</span>

@@ -61,11 +61,11 @@ class ChecklistItemDraft:
     requirement: str
     technique: str
     importance: str
-    source_references: list[dict[str, Any]]
+    source_citations: str
     retrieval_hints: list[str]
-    expected_evidence: list[str]
-    compliance_rules: dict[str, str]
-    consequence_rules: dict[str, str]
+    expected_evidence: str
+    compliance_rules: str
+    consequence_rules: str
     admin_config_refs: list[int]
     sort_order: int
     content_source: str = "precise_search"

@@ -12,6 +12,10 @@ from app.engine.base import (
 )
 from app.engine.checklist_merge import merge_checklist_drafts
 from app.services.agent_os import AgentOSClient
+from app.services.checklist_categories import (
+    FIXED_CATEGORY_IDS,
+    fixed_categories_draft,
+)
 from app.services.checklist_context import PromptContext
 
 TENDER_CHECKLIST_GENERATOR_APP_NAME = "tender_checklist_generator_app"
@@ -111,12 +115,114 @@ def _normalize_admin_config_refs(value: Any) -> list[int]:
     return refs
 
 
+def _require_markdown(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ChecklistAgentResponseError(f"missing or empty {field}")
+    return value.strip()
+
+
+def _parse_v2_item(row: dict[str, Any], index: int) -> ChecklistItemDraft:
+    title = _as_nonempty_str(row.get("title"))
+    if not title:
+        raise ChecklistAgentResponseError("item title required")
+    category_id = str(row.get("category_id", "")).strip()
+    if category_id not in FIXED_CATEGORY_IDS:
+        raise ChecklistAgentResponseError("invalid category_id")
+    retrieval_hints = _as_string_list(row.get("retrieval_hints"), fallback=[title])
+    if not retrieval_hints:
+        retrieval_hints = [title]
+    admin_config_refs = _normalize_admin_config_refs(row.get("admin_config_refs"))
+    content_target = row.get("content_target")
+    if not isinstance(content_target, dict):
+        content_target = {}
+    else:
+        content_target = dict(content_target)
+    if not str(content_target.get("query") or "").strip():
+        content_target["query"] = title
+    if not str(content_target.get("file_role") or "").strip():
+        content_target["file_role"] = "bid"
+    return ChecklistItemDraft(
+        id=_as_nonempty_str(row.get("id"), f"item-{index + 1}"),
+        category_id=category_id,
+        title=title,
+        requirement=_as_nonempty_str(row.get("requirement")),
+        technique=_as_nonempty_str(row.get("technique"), "对照招标文件"),
+        importance=_as_nonempty_str(row.get("importance"), "medium"),
+        source_citations=_require_markdown(row.get("source_citations"), "source_citations"),
+        retrieval_hints=retrieval_hints,
+        expected_evidence=_require_markdown(
+            row.get("expected_evidence"), "expected_evidence"
+        ),
+        compliance_rules=_require_markdown(row.get("compliance_rules"), "compliance_rules"),
+        consequence_rules=_require_markdown(
+            row.get("consequence_rules"), "consequence_rules"
+        ),
+        admin_config_refs=admin_config_refs,
+        sort_order=_as_sort_order(row.get("sort_order"), index),
+        content_target=content_target,
+        diagnosis_mode=_normalize_diagnosis_mode(row.get("diagnosis_mode")),
+    )
+
+
+def _parse_v2_payload(payload: dict[str, Any]) -> ChecklistDraft:
+    items_raw = _require_list(payload, "items")
+    items = [_parse_v2_item(row, index) for index, row in enumerate(items_raw)]
+    return ChecklistDraft(
+        schema_version="2",
+        categories=fixed_categories_draft(),
+        items=items,
+        raw_response=payload,
+    )
+
+
+def _v1_source_to_citations(source_references: list[Any]) -> str:
+    lines: list[str] = []
+    for ref in source_references:
+        if not isinstance(ref, dict):
+            continue
+        section = str(ref.get("section") or "").strip()
+        if section:
+            lines.append(f"- 章节：{section}")
+    return "\n".join(lines) if lines else "- 章节：未标注"
+
+
+def _v1_list_to_markdown(values: list[str]) -> str:
+    return "\n".join(f"- {value}" for value in values if value.strip())
+
+
+def _v1_compliance_to_markdown(rules: dict[str, str]) -> str:
+    labels = {
+        "satisfied": "满足",
+        "violated": "违反",
+        "cannot_satisfy": "不能满足",
+        "insufficient_evidence": "证据不足",
+    }
+    parts: list[str] = []
+    for key, label in labels.items():
+        text = str(rules.get(key) or "").strip() or "无"
+        parts.append(f"## {label}\n{text}")
+    return "\n\n".join(parts)
+
+
+def _v1_consequence_to_markdown(rules: dict[str, str]) -> str:
+    if not rules:
+        return "[general_risk]\n存在合规风险"
+    tag, text = next(iter(rules.items()))
+    return f"[{tag}]\n{text}"
+
+
 def parse_checklist_payload(payload: dict[str, Any]) -> ChecklistDraft:
     if not isinstance(payload, dict):
         raise ChecklistAgentResponseError("payload must be object")
     schema_version = payload.get("schema_version")
     if not isinstance(schema_version, str) or not schema_version.strip():
         raise ChecklistAgentResponseError("schema_version invalid")
+    if schema_version.strip() == "2":
+        return _parse_v2_payload(payload)
+    return _parse_v1_payload(payload, schema_version.strip())
+
+
+def _parse_v1_payload(payload: dict[str, Any], schema_version: str) -> ChecklistDraft:
     categories_raw = _require_list(payload, "categories")
     items_raw = _require_list(payload, "items")
     categories: list[ChecklistCategoryDraft] = []
@@ -188,11 +294,13 @@ def parse_checklist_payload(payload: dict[str, Any]) -> ChecklistDraft:
                 requirement=_as_nonempty_str(row.get("requirement")),
                 technique=_as_nonempty_str(row.get("technique"), "对照招标文件"),
                 importance=_as_nonempty_str(row.get("importance"), "medium"),
-                source_references=list(source_references),
+                source_citations=_v1_source_to_citations(source_references),
                 retrieval_hints=retrieval_hints,
-                expected_evidence=expected_evidence,
-                compliance_rules={str(k): str(v) for k, v in compliance_rules.items()},
-                consequence_rules=consequence_rules,
+                expected_evidence=_v1_list_to_markdown(expected_evidence),
+                compliance_rules=_v1_compliance_to_markdown(
+                    {str(k): str(v) for k, v in compliance_rules.items()}
+                ),
+                consequence_rules=_v1_consequence_to_markdown(consequence_rules),
                 admin_config_refs=admin_config_refs,
                 sort_order=_as_sort_order(row.get("sort_order"), index),
                 content_target=content_target,
@@ -215,7 +323,7 @@ def parse_checklist_payload(payload: dict[str, Any]) -> ChecklistDraft:
                     requirement=item.requirement,
                     technique=item.technique,
                     importance=item.importance,
-                    source_references=item.source_references,
+                    source_citations=item.source_citations,
                     retrieval_hints=item.retrieval_hints,
                     expected_evidence=item.expected_evidence,
                     compliance_rules=item.compliance_rules,
@@ -318,7 +426,4 @@ class AgentOSChecklistAgent:
             task_id,
             segment_count,
         )
-        return merge_checklist_drafts(
-            partials,
-            max_items_per_category=config.CHECKLIST_MAX_ITEMS_PER_CATEGORY,
-        )
+        return merge_checklist_drafts(partials)

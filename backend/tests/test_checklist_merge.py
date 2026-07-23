@@ -3,6 +3,7 @@ from app.engine.checklist_merge import merge_checklist_drafts
 
 
 def _item(item_id, category_id, title, requirement, section="正文", segment_index=0):
+    del segment_index
     return ChecklistItemDraft(
         id=item_id,
         category_id=category_id,
@@ -10,24 +11,11 @@ def _item(item_id, category_id, title, requirement, section="正文", segment_in
         requirement=requirement,
         technique=f"核对{title}",
         importance="high",
-        source_references=[
-            {
-                "section": section,
-                "start": 0,
-                "end": 1,
-                "segment_index": segment_index,
-                "coordinate_space": "segment",
-            }
-        ],
+        source_citations=f"- 章节：{section}",
         retrieval_hints=[title],
-        expected_evidence=[title],
-        compliance_rules={
-            "satisfied": "ok",
-            "violated": "bad",
-            "cannot_satisfy": "no",
-            "insufficient_evidence": "缺少",
-        },
-        consequence_rules={"general_risk": "风险"},
+        expected_evidence=f"- {title}",
+        compliance_rules="## 满足\nok\n\n## 违反\nbad\n\n## 不能满足\nno\n\n## 证据不足\n缺少",
+        consequence_rules="[general_risk]\n风险",
         admin_config_refs=[],
         sort_order=1,
     )
@@ -35,45 +23,43 @@ def _item(item_id, category_id, title, requirement, section="正文", segment_in
 
 def test_merge_dedupes_items_and_rewrites_ids():
     draft_a = ChecklistDraft(
-        schema_version="1",
+        schema_version="2",
         categories=[
             ChecklistCategoryDraft(
-                id="c-a",
-                name="资格证明材料",
-                description="资格",
-                retrieval_query="资格",
-                expected_locations=["资格"],
+                id="cat_001",
+                name="废标红线",
+                description="废标",
+                retrieval_query="废标",
+                expected_locations=[],
                 sort_order=1,
             )
         ],
-        items=[_item("i-a", "c-a", "营业执照", "须提供营业执照", segment_index=0)],
+        items=[_item("i-a", "cat_001", "营业执照", "须提供营业执照")],
         raw_response={"segment": 0},
     )
     draft_b = ChecklistDraft(
-        schema_version="1",
+        schema_version="2",
         categories=[
             ChecklistCategoryDraft(
-                id="c-b",
-                name="资格证明材料",
+                id="cat_001",
+                name="废标红线",
                 description="应被忽略的二次描述",
                 retrieval_query="证照",
-                expected_locations=["证照"],
+                expected_locations=[],
                 sort_order=1,
             )
         ],
         items=[
-            _item("i-b1", "c-b", "营业执照", "须提供营业执照", segment_index=1),
-            _item("i-b2", "c-b", "资质证书", "须提供资质", "资质", 1),
+            _item("i-b1", "cat_001", "营业执照", "须提供营业执照"),
+            _item("i-b2", "cat_001", "资质证书", "须提供资质", "资质"),
         ],
         raw_response={"segment": 1},
     )
 
-    merged = merge_checklist_drafts([draft_a, draft_b], max_items_per_category=20)
+    merged = merge_checklist_drafts([draft_a, draft_b])
 
-    assert [c.name for c in merged.categories] == ["资格证明材料"]
+    assert [c.name for c in merged.categories] == ["废标红线"]
     assert merged.categories[0].id == "category-001"
-    assert "资格" in merged.categories[0].retrieval_query
-    assert "证照" in merged.categories[0].retrieval_query
     assert {item.title for item in merged.items} == {"营业执照", "资质证书"}
     assert [item.id for item in merged.items] == ["item-001", "item-002"]
     assert all(item.category_id == "category-001" for item in merged.items)
@@ -81,28 +67,73 @@ def test_merge_dedupes_items_and_rewrites_ids():
     assert "merged" in merged.raw_response
 
 
-def test_merge_splits_oversized_category_by_section():
-    category = ChecklistCategoryDraft(
-        id="c1",
-        name="综合响应材料",
-        description="综合",
-        retrieval_query="综合",
-        expected_locations=[],
-        sort_order=1,
-    )
+def test_merge_keeps_single_category_without_splitting():
     items = [
-        _item(f"i{i}", "c1", f"标题{i}", f"要求{i}", section=f"章节{i // 2}", segment_index=0)
+        _item(f"i{i}", "cat_003", f"标题{i}", f"要求{i}", section="同一章节")
         for i in range(5)
     ]
     draft = ChecklistDraft(
-        schema_version="1",
-        categories=[category],
+        schema_version="2",
+        categories=[
+            ChecklistCategoryDraft(
+                id="cat_003",
+                name="格式要求",
+                description="格式",
+                retrieval_query="格式",
+                expected_locations=[],
+                sort_order=3,
+            )
+        ],
         items=items,
         raw_response={},
     )
-    merged = merge_checklist_drafts([draft], max_items_per_category=2)
-    assert len(merged.categories) >= 3
-    assert all(
-        sum(1 for item in merged.items if item.category_id == category.id) <= 2
-        for category in merged.categories
+    merged = merge_checklist_drafts([draft])
+    assert len(merged.categories) == 1
+    assert merged.categories[0].name == "格式要求"
+    assert len(merged.items) == 5
+
+
+def test_merge_keeps_many_items_in_one_fixed_category():
+    items = [
+        _item(
+            f"i{i}",
+            "cat_001",
+            f"标题{i}",
+            f"要求{i}",
+            section="第三章 评审办法 5.3",
+        )
+        for i in range(25)
+    ]
+    draft = ChecklistDraft(
+        schema_version="2",
+        categories=[],
+        items=items,
+        raw_response={},
     )
+    merged = merge_checklist_drafts([draft])
+    assert len(merged.categories) == 1
+    assert merged.categories[0].name == "废标红线"
+    assert len(merged.items) == 25
+
+
+def test_merge_groups_by_fixed_category_id():
+    draft_a = ChecklistDraft(
+        schema_version="2",
+        categories=[],
+        items=[_item("i1", "cat_001", "红线A", "要求A")],
+        raw_response={},
+    )
+    draft_b = ChecklistDraft(
+        schema_version="2",
+        categories=[],
+        items=[
+            _item("i2", "cat_001", "红线B", "要求B"),
+            _item("i3", "cat_004", "得分C", "要求C"),
+        ],
+        raw_response={},
+    )
+    merged = merge_checklist_drafts([draft_a, draft_b])
+    names = {category.name for category in merged.categories}
+    assert "废标红线" in names
+    assert "得分检查" in names
+    assert len(merged.items) == 3

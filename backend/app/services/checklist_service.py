@@ -234,6 +234,114 @@ def _load_json_object(raw: str) -> dict[str, Any]:
     return value
 
 
+def _try_load_json_list(raw: str) -> list[Any] | None:
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, list) else None
+
+
+def _try_load_json_rules(raw: str) -> dict[str, str] | None:
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    if any(not isinstance(key, str) or not isinstance(rule, str) for key, rule in value.items()):
+        return None
+    return value
+
+
+def _legacy_list_to_markdown(values: list[Any]) -> str:
+    return "\n".join(f"- {str(value).strip()}" for value in values if str(value).strip())
+
+
+def _legacy_compliance_to_markdown(rules: dict[str, str]) -> str:
+    labels = {
+        "satisfied": "满足",
+        "violated": "违反",
+        "cannot_satisfy": "不能满足",
+        "insufficient_evidence": "证据不足",
+    }
+    parts: list[str] = []
+    for key, label in labels.items():
+        text = str(rules.get(key) or "").strip() or "无"
+        parts.append(f"## {label}\n{text}")
+    return "\n\n".join(parts)
+
+
+def _legacy_consequence_to_markdown(rules: dict[str, str]) -> str:
+    if not rules:
+        return "[general_risk]\n存在合规风险"
+    tag, text = next(iter(rules.items()))
+    return f"[{tag}]\n{text}"
+
+
+def _legacy_source_to_citations(source_references: list[Any]) -> str:
+    lines: list[str] = []
+    for reference in source_references:
+        if not isinstance(reference, dict):
+            continue
+        section = str(reference.get("section") or "").strip()
+        if section:
+            lines.append(f"- 章节：{section}")
+    return "\n".join(lines) if lines else "- 章节：未标注"
+
+
+def _format_item_for_api(item: ChecklistItem, schema_version: str) -> dict[str, Any]:
+    base = {
+        "id": item.id,
+        "title": item.title,
+        "requirement": item.requirement,
+        "technique": item.technique,
+        "importance": item.importance,
+        "retrieval_hints": _load_json_list(item.retrieval_hints, entries=str),
+        "admin_config_refs": _load_json_list(item.admin_config_refs, entries=int),
+        "content_source": item.content_source,
+        "content_target": _load_json_object(item.content_target),
+        "diagnosis_mode": _normalize_diagnosis_mode(item.diagnosis_mode),
+        "sort_order": item.sort_order,
+    }
+    if schema_version == "2":
+        return {
+            **base,
+            "source_citations": item.source_references or "",
+            "expected_evidence": item.expected_evidence or "",
+            "compliance_rules": item.compliance_rules or "",
+            "consequence_rules": item.consequence_rules or "",
+        }
+
+    source_refs = _try_load_json_list(item.source_references or "[]")
+    expected = _try_load_json_list(item.expected_evidence or "[]")
+    compliance = _try_load_json_rules(item.compliance_rules or "{}")
+    consequence = _try_load_json_rules(item.consequence_rules or "{}")
+    return {
+        **base,
+        "source_citations": (
+            _legacy_source_to_citations(source_refs)
+            if source_refs is not None
+            else (item.source_references or "")
+        ),
+        "expected_evidence": (
+            _legacy_list_to_markdown(expected)
+            if expected is not None
+            else (item.expected_evidence or "")
+        ),
+        "compliance_rules": (
+            _legacy_compliance_to_markdown(compliance)
+            if compliance is not None
+            else (item.compliance_rules or "")
+        ),
+        "consequence_rules": (
+            _legacy_consequence_to_markdown(consequence)
+            if consequence is not None
+            else (item.consequence_rules or "")
+        ),
+    }
+
+
 def _validate_content_target(content_source: str, content_target: dict[str, Any], item_id: str) -> None:
     if not isinstance(content_target, dict):
         raise ChecklistValidationError(f"item {item_id} content_target must be a dict")
@@ -300,35 +408,7 @@ async def get_report(task_id: str) -> dict[str, Any]:
         if item.category_id not in item_groups or item.importance not in importance_counts:
             raise ChecklistValidationError("stored checklist data is invalid")
         item_groups[item.category_id].append(
-            {
-                "id": item.id,
-                "title": item.title,
-                "requirement": item.requirement,
-                "technique": item.technique,
-                "importance": item.importance,
-                "source_references": _load_json_list(
-                    item.source_references,
-                    entries=dict,
-                ),
-                "retrieval_hints": _load_json_list(
-                    item.retrieval_hints,
-                    entries=str,
-                ),
-                "expected_evidence": _load_json_list(
-                    item.expected_evidence,
-                    entries=str,
-                ),
-                "compliance_rules": _load_json_rules(item.compliance_rules),
-                "consequence_rules": _load_json_rules(item.consequence_rules),
-                "admin_config_refs": _load_json_list(
-                    item.admin_config_refs,
-                    entries=int,
-                ),
-                "content_source": item.content_source,
-                "content_target": _load_json_object(item.content_target),
-                "diagnosis_mode": _normalize_diagnosis_mode(item.diagnosis_mode),
-                "sort_order": item.sort_order,
-            }
+            _format_item_for_api(item, generation.schema_version)
         )
         importance_counts[item.importance] += 1
 
@@ -518,7 +598,6 @@ def validate_draft(
 
     item_ids: set[str] = set()
     normalized_items: set[tuple[str, str]] = set()
-    category_counts = {category_id: 0 for category_id in category_ids}
     valid_admin_config_ids = {
         config_item["id"]
         for config_item in admin_configs
@@ -541,11 +620,6 @@ def validate_draft(
             raise ChecklistValidationError(
                 f"item {item.id} references an unknown category"
             )
-        category_counts[item.category_id] += 1
-        if category_counts[item.category_id] > config.CHECKLIST_MAX_ITEMS_PER_CATEGORY:
-            raise ChecklistValidationError(
-                "category exceeds maximum items per category"
-            )
 
         _require_nonempty_string(item.title, "item title")
         _require_nonempty_string(item.requirement, "item requirement")
@@ -565,14 +639,23 @@ def validate_draft(
             raise ChecklistValidationError(
                 f"item {item.id} importance is invalid"
             )
-        if not isinstance(item.source_references, list) or not item.source_references:
-            raise ChecklistValidationError(
-                f"item {item.id} source_references must be non-empty"
-            )
-        for reference in item.source_references:
-            _validate_source_reference(reference, context, tender_markdown, item.id)
+        _require_nonempty_string(
+            item.source_citations,
+            f"item {item.id} source_citations",
+        )
         _require_string_list(item.retrieval_hints, "item retrieval_hints")
-        _require_string_list(item.expected_evidence, "item expected_evidence")
+        _require_nonempty_string(
+            item.expected_evidence,
+            f"item {item.id} expected_evidence",
+        )
+        _require_nonempty_string(
+            item.compliance_rules,
+            f"item {item.id} compliance_rules",
+        )
+        _require_nonempty_string(
+            item.consequence_rules,
+            f"item {item.id} consequence_rules",
+        )
         if not isinstance(item.admin_config_refs, list):
             raise ChecklistValidationError(
                 "item admin_config_refs must be list[int]"
@@ -583,17 +666,6 @@ def validate_draft(
                 raise ChecklistValidationError(
                     "item admin_config_refs contains an unknown config id"
                 )
-        _require_rules(
-            item.compliance_rules,
-            "item compliance_rules",
-            _COMPLIANCE_KEYS,
-            optional_empty_keys=_COMPLIANCE_OPTIONAL_EMPTY_KEYS,
-        )
-        _require_rules(
-            item.consequence_rules,
-            "item consequence_rules",
-            _CONSEQUENCE_KEYS,
-        )
         content_source = item.content_source or "precise_search"
         if content_source not in _CONTENT_SOURCE_VALUES:
             raise ChecklistValidationError(
@@ -921,28 +993,14 @@ class ChecklistService:
                             requirement=item.requirement,
                             technique=item.technique,
                             importance=item.importance,
-                            source_references=json.dumps(
-                                item.source_references,
-                                ensure_ascii=False,
-                            ),
+                            source_references=item.source_citations,
                             retrieval_hints=json.dumps(
                                 item.retrieval_hints,
                                 ensure_ascii=False,
                             ),
-                            expected_evidence=json.dumps(
-                                item.expected_evidence,
-                                ensure_ascii=False,
-                            ),
-                            compliance_rules=json.dumps(
-                                item.compliance_rules,
-                                ensure_ascii=False,
-                                sort_keys=True,
-                            ),
-                            consequence_rules=json.dumps(
-                                item.consequence_rules,
-                                ensure_ascii=False,
-                                sort_keys=True,
-                            ),
+                            expected_evidence=item.expected_evidence,
+                            compliance_rules=item.compliance_rules,
+                            consequence_rules=item.consequence_rules,
                             admin_config_refs=json.dumps(item.admin_config_refs),
                             content_source=item.content_source or "precise_search",
                             content_target=json.dumps(

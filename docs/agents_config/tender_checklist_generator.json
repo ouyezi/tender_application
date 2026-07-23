@@ -89,90 +89,16 @@
       {
         "id": "f_schema_version",
         "name": "schema_version",
-        "description": "检查项 schema 版本，固定为 1",
+        "description": "检查项 schema 版本，固定为 2",
         "type": "string",
         "required": true,
         "children": null,
         "itemType": null
       },
       {
-        "id": "f_categories",
-        "name": "categories",
-        "description": "动态分类列表",
-        "type": "array",
-        "required": true,
-        "children": [
-          {
-            "id": "f_cat_id",
-            "name": "id",
-            "description": "分类本地 ID",
-            "type": "string",
-            "required": true,
-            "children": null,
-            "itemType": null
-          },
-          {
-            "id": "f_cat_name",
-            "name": "name",
-            "description": "动态分类名称",
-            "type": "string",
-            "required": true,
-            "children": null,
-            "itemType": null
-          },
-          {
-            "id": "f_cat_desc",
-            "name": "description",
-            "description": "分类描述",
-            "type": "string",
-            "required": true,
-            "children": null,
-            "itemType": null
-          },
-          {
-            "id": "f_cat_rq",
-            "name": "retrieval_query",
-            "description": "分类级检索查询",
-            "type": "string",
-            "required": true,
-            "children": null,
-            "itemType": null
-          },
-          {
-            "id": "f_cat_loc",
-            "name": "expected_locations",
-            "description": "预计标书位置",
-            "type": "array",
-            "required": true,
-            "children": [
-              {
-                "id": "f_cat_loc_item",
-                "name": "item",
-                "description": "位置描述",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              }
-            ],
-            "itemType": "string"
-          },
-          {
-            "id": "f_cat_sort",
-            "name": "sort_order",
-            "description": "排序",
-            "type": "number",
-            "required": true,
-            "children": null,
-            "itemType": null
-          }
-        ],
-        "itemType": "object"
-      },
-      {
         "id": "f_items",
         "name": "items",
-        "description": "检查项列表",
+        "description": "检查项列表（items-only，禁止输出 categories）",
         "type": "array",
         "required": true,
         "children": [
@@ -188,7 +114,7 @@
           {
             "id": "f_item_cid",
             "name": "category_id",
-            "description": "所属分类 ID",
+            "description": "固定分类 ID：cat_001～cat_006",
             "type": "string",
             "required": true,
             "children": null,
@@ -241,207 +167,39 @@
           },
           {
             "id": "f_item_src",
-            "name": "source_references",
-            "description": "招标依据与定位",
-            "type": "array",
+            "name": "source_citations",
+            "description": "招标依据 Markdown（如 - 章节：第三章）",
+            "type": "string",
             "required": true,
-            "children": [
-              {
-                "id": "f_src_section",
-                "name": "section",
-                "description": "章节/段落",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_src_start",
-                "name": "start",
-                "description": "分片内起始偏移",
-                "type": "number",
-                "required": true,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_src_end",
-                "name": "end",
-                "description": "分片内结束偏移",
-                "type": "number",
-                "required": true,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_src_seg",
-                "name": "segment_index",
-                "description": "分片序号",
-                "type": "number",
-                "required": true,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_src_coord",
-                "name": "coordinate_space",
-                "description": "坐标空间，固定 segment",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              }
-            ],
-            "itemType": "object"
-          },
-          {
-            "id": "f_item_hints",
-            "name": "retrieval_hints",
-            "description": "检索提示",
-            "type": "array",
-            "required": true,
-            "children": [
-              {
-                "id": "f_hint_item",
-                "name": "item",
-                "description": "关键词或同义表达",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              }
-            ],
-            "itemType": "string"
+            "children": null,
+            "itemType": null
           },
           {
             "id": "f_item_ev",
             "name": "expected_evidence",
-            "description": "预期证据",
-            "type": "array",
+            "description": "预期证据 Markdown 列表",
+            "type": "string",
             "required": true,
-            "children": [
-              {
-                "id": "f_ev_item",
-                "name": "item",
-                "description": "证据描述",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              }
-            ],
-            "itemType": "string"
+            "children": null,
+            "itemType": null
           },
           {
             "id": "f_item_comp",
             "name": "compliance_rules",
-            "description": "符合性判定规则",
-            "type": "object",
+            "description": "符合性判定 Markdown（## 满足/违反/不能满足/证据不足）",
+            "type": "string",
             "required": true,
-            "children": [
-              {
-                "id": "f_comp_sat",
-                "name": "satisfied",
-                "description": "满足",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_comp_vio",
-                "name": "violated",
-                "description": "违反",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_comp_can",
-                "name": "cannot_satisfy",
-                "description": "不能满足；无此类情形时可留空",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_comp_ins",
-                "name": "insufficient_evidence",
-                "description": "证据不足；无适用情形时可留空；offline 项须说明电子版无法核验的情形",
-                "type": "string",
-                "required": true,
-                "children": null,
-                "itemType": null
-              }
-            ],
+            "children": null,
             "itemType": null
           },
           {
             "id": "f_item_cons",
             "name": "consequence_rules",
-            "description": "后果判定规则",
-            "type": "object",
+            "description": "后果说明 Markdown，首行 [bid_unusable|score_risk|no_score|general_risk]",
+            "type": "string",
             "required": true,
-            "children": [
-              {
-                "id": "f_cons_ns",
-                "name": "no_score",
-                "description": "无法得分",
-                "type": "string",
-                "required": false,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_cons_bu",
-                "name": "bid_unusable",
-                "description": "废标/标书不可用",
-                "type": "string",
-                "required": false,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_cons_sr",
-                "name": "score_risk",
-                "description": "扣分风险",
-                "type": "string",
-                "required": false,
-                "children": null,
-                "itemType": null
-              },
-              {
-                "id": "f_cons_gr",
-                "name": "general_risk",
-                "description": "一般风险",
-                "type": "string",
-                "required": false,
-                "children": null,
-                "itemType": null
-              }
-            ],
+            "children": null,
             "itemType": null
-          },
-          {
-            "id": "f_item_admin",
-            "name": "admin_config_refs",
-            "description": "相关管理配置 ID",
-            "type": "array",
-            "required": false,
-            "children": [
-              {
-                "id": "f_admin_item",
-                "name": "item",
-                "description": "配置 ID",
-                "type": "number",
-                "required": true,
-                "children": null,
-                "itemType": null
-              }
-            ],
-            "itemType": "number"
           },
           {
             "id": "f_item_sort",
@@ -458,7 +216,7 @@
     ]
   },
   "prompt": {
-    "systemPrompt": "你是招标诊断检查项生成助手。\n\n## 固定生成规则与输出约束\n{{system_instructions}}\n\n## 完整解读报告（Markdown）\n{{interpret_report}}\n\n## 管理端诊断配置（JSON 字符串，软性参考，可采纳/合并/忽略）\n{{admin_config}}\n\n## 当前招标正文分片（短文档则为全文）\n{{tender_segment}}\n\n## 职责\n1. 只基于上方「当前招标正文分片」生成本分片的近终态检查项清单；禁止无招标依据的推断。\n2. 可参考解读报告与管理端配置理解背景，但每条检查项必须能在本分片正文中追溯。\n3. 每条检查项只描述一个可独立判断的要点，填写 title、requirement、technique、importance。\n4. importance 只能是 high|medium|low。\n5. compliance_rules 必须包含键：satisfied、violated、cannot_satisfy、insufficient_evidence；satisfied、violated 必须为非空字符串；cannot_satisfy、insufficient_evidence 若无适用情形可留空；禁止 satisfied、violated 留空；diagnosis_mode=offline 的检查项，insufficient_evidence 须写明线下核验时证据不足的表现（如「电子版无法确认密封/签章/递交等形式要件，需人工现场核验」）。\n6. consequence_rules 的键只能来自：no_score、bid_unusable、score_risk、general_risk。\n7. source_references 必须含 coordinate_space=\"segment\"、segment_index、start、end、section，且 start/end 偏移落在本分片内；segment_index 与调用上下文一致（通常从 0 起）。\n8. 按预计命中的标书内容位置动态分类，输出 categories 与 items；items.category_id 必须引用本响应 categories 中的 id。\n9. schema_version 必须为 \"1\"。\n10. 每条检查项必须输出 diagnosis_mode，取值只能是 file|offline；涉及打印/装订/密封/签字盖章/现场递交等需线下核验的检查项标为 offline，其余为 file；offline 项须在 compliance_rules.insufficient_evidence 中说明电子版证据局限性。\n11. 去重与合并：同一可独立判断的合规要点（如相同填写格式、同一数值精度要求）在正文多处出现时，只生成一条检查项；title 与 requirement 使用统一、规范的表述（便于跨分片合并）；source_references 可列多处出处，禁止因章节或表述角度不同而拆成语义重复的多条。\n12. 得分点细化：评标/评分/价格分等可量化打分内容，须拆到可独立判断的得分点或扣分点；禁止把整章评分标准合并成一条笼统项。但同一评分项下属于同一套计算公式或判定机制的子规则（如价格分中的精度保留、高价惩罚系数、低价优惠系数共同构成一次价格得分计算），应合并为一条检查项，禁止机械拆成多条语义关联的子项。\n13. 得分点检查项规范：title 须体现「评分大类·具体得分点」（合并项可用概括性名称，如「价格分·综合折扣率与价格得分计算」）；requirement 须写明满分/权重（若原文有）、满足得分的条件、失分/扣分情形（合并项须完整列出公式、系数、精度等全部子规则）；与评分相关的 consequence_rules 须标注 no_score 或 score_risk，并在规则文字中说明分值影响；technique 说明如何在标书中定位该得分点的响应材料。\n14. 非评分类合规要点仍按「一条一要点」拆分，但与得分点不得混并在同一条中。\n15. 可参考解读报告中的评分细则理解结构，但每条检查项必须能在本分片正文中追溯。\n16. 严格输出符合 outputSchema 的 JSON 对象，不要输出额外说明文字。\n\n同时遵守上方「固定生成规则」；若有冲突，以可追溯性与 schema 完整性为优先。",
+    "systemPrompt": "你是招标诊断检查项生成助手。\n\n## 固定生成规则与输出约束\n{{system_instructions}}\n\n## 完整解读报告（Markdown）\n{{interpret_report}}\n\n## 管理端诊断配置（JSON 字符串，软性参考，可采纳/合并/忽略）\n{{admin_config}}\n\n## 当前招标正文分片（短文档则为全文）\n{{tender_segment}}\n\n## 职责\n1. 只基于上方「当前招标正文分片」生成本分片的近终态检查项清单；禁止无招标依据的推断。\n2. 可参考解读报告与管理端配置理解背景，但每条检查项必须能在本分片正文中追溯。\n3. 每条检查项只描述一个可独立判断的要点，填写 title、requirement、technique、importance。\n4. importance 只能是 high|medium|low。\n5. compliance_rules、expected_evidence、source_citations、consequence_rules 均为 Markdown 字符串；compliance_rules 须含 ## 满足/违反/不能满足/证据不足 四节；file 项证据不足可写「无」，offline 项须说明电子版无法核验的情形。\n6. consequence_rules 首行必须是 [bid_unusable]、[score_risk]、[no_score] 或 [general_risk] 之一，第二行起写说明；禁止 JSON 对象。\n7. category_id 只能使用固定六类：cat_001 废标红线、cat_002 资质文件、cat_003 格式要求、cat_004 得分检查、cat_005 风险检查、cat_006 其他检查；禁止输出 categories 数组。\n8. schema_version 必须为 \"2\"；顶层仅 schema_version 与 items。\n9. 每条检查项必须输出 diagnosis_mode，取值只能是 file|offline；涉及打印/装订/密封/签字盖章/现场递交等需线下核验的检查项标为 offline，其余为 file。\n10. 去重与合并：同一可独立判断的合规要点在正文多处出现时，只生成一条检查项；source_citations 可列多处出处，禁止语义重复拆分。\n11. 得分点细化：评标/评分/价格分等可量化打分内容，须拆到可独立判断的得分点或扣分点；同一套计算公式或判定机制的子规则应合并为一条。\n12. 得分点检查项规范：title 须体现「评分大类·具体得分点」；requirement 须写明满分/权重、满足得分条件、失分情形；consequence_rules 首行标注 [no_score] 或 [score_risk]。\n13. 非评分类合规要点仍按「一条一要点」拆分，但与得分点不得混并在同一条中。\n14. 可参考解读报告中的评分细则理解结构，但每条检查项必须能在本分片正文中追溯。\n15. 严格输出符合 outputSchema 的 JSON 对象，不要输出额外说明文字。\n\n同时遵守上方「固定生成规则」；若有冲突，以可追溯性与 schema 完整性为优先。",
     "initialMessages": []
   },
   "runtime": {

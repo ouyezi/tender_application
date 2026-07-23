@@ -14,6 +14,46 @@ from app.services.checklist_context import (
 from app.services.checklist_service import validate_draft
 
 
+V2_PAYLOAD = {
+    "schema_version": "2",
+    "items": [
+        {
+            "id": "item_001",
+            "category_id": "cat_001",
+            "title": "报价表签章",
+            "requirement": "必须签字盖章",
+            "technique": "检查报价表签章页",
+            "importance": "high",
+            "diagnosis_mode": "offline",
+            "source_citations": "- 章节：第三章",
+            "expected_evidence": "- 签章页",
+            "compliance_rules": "## 满足\n齐全",
+            "consequence_rules": "[bid_unusable]\n否决",
+            "sort_order": 1,
+        }
+    ],
+}
+
+
+def test_parse_checklist_payload_v2_items_only():
+    draft = parse_checklist_payload(V2_PAYLOAD)
+    assert draft.schema_version == "2"
+    assert len(draft.categories) == 6
+    assert draft.categories[0].id == "cat_001"
+    assert len(draft.items) == 1
+    item = draft.items[0]
+    assert item.source_citations.startswith("- 章节")
+    assert item.expected_evidence == "- 签章页"
+    assert item.compliance_rules.startswith("## 满足")
+    assert item.retrieval_hints
+
+
+def test_parse_v2_rejects_unknown_category():
+    bad = {**V2_PAYLOAD, "items": [{**V2_PAYLOAD["items"][0], "category_id": "cat_999"}]}
+    with pytest.raises(ChecklistAgentResponseError, match="category_id"):
+        parse_checklist_payload(bad)
+
+
 def _flash_sparse_payload() -> dict:
     """Shape observed from qwen3.6-flash on real tender segments."""
     return {
@@ -77,43 +117,20 @@ async def test_generate_maps_explicit_fields_and_app_name():
         captured["app_name"] = app_name
         captured["input"] = input_data
         return {
-            "schema_version": "1",
-            "categories": [
-                {
-                    "id": "c1",
-                    "name": "资格证明材料",
-                    "description": "资格",
-                    "retrieval_query": "资格",
-                    "expected_locations": ["资格"],
-                    "sort_order": 1,
-                }
-            ],
+            "schema_version": "2",
             "items": [
                 {
                     "id": "i1",
-                    "category_id": "c1",
+                    "category_id": "cat_002",
                     "title": "营业执照",
                     "requirement": "须提供营业执照",
                     "technique": "核对证照",
                     "importance": "high",
-                    "source_references": [
-                        {
-                            "section": "资格",
-                            "start": 0,
-                            "end": 1,
-                            "segment_index": 0,
-                            "coordinate_space": "segment",
-                        }
-                    ],
+                    "source_citations": "- 章节：资格",
                     "retrieval_hints": ["营业执照"],
-                    "expected_evidence": ["营业执照复印件"],
-                    "compliance_rules": {
-                        "satisfied": "有",
-                        "violated": "冲突",
-                        "cannot_satisfy": "不能",
-                        "insufficient_evidence": "不足",
-                    },
-                    "consequence_rules": {"general_risk": "风险"},
+                    "expected_evidence": "- 有效营业执照复印件",
+                    "compliance_rules": "## 满足\n有\n\n## 违反\n冲突\n\n## 不能满足\n不能\n\n## 证据不足\n不足",
+                    "consequence_rules": "[general_risk]\n风险",
                     "admin_config_refs": [],
                     "sort_order": 1,
                 }
@@ -130,8 +147,9 @@ async def test_generate_maps_explicit_fields_and_app_name():
         "tender_segment",
     }
     assert captured["input"]["tender_segment"] == "投标人须提供营业执照。"
-    assert draft.schema_version == "1"
+    assert draft.schema_version == "2"
     assert draft.categories[0].id == "category-001"
+    assert draft.categories[0].name == "资质文件"
     assert draft.items[0].id == "item-001"
     assert agent.agent_type == "agent_os"
     assert agent.agent_version == "1"
@@ -140,7 +158,7 @@ async def test_generate_maps_explicit_fields_and_app_name():
 @pytest.mark.asyncio
 async def test_generate_rejects_missing_categories():
     async def fake_invoke(app_name, input_data):
-        return {"schema_version": "1", "items": []}
+        return {"schema_version": "2", "items": []}
 
     agent = AgentOSChecklistAgent(invoke_app=fake_invoke)
     with pytest.raises(ChecklistAgentResponseError):
@@ -155,43 +173,20 @@ async def test_generate_invokes_once_per_segment():
         calls["n"] += 1
         seg_index = 0 if "甲" in input_data["tender_segment"] else 1
         return {
-            "schema_version": "1",
-            "categories": [
-                {
-                    "id": "c1",
-                    "name": f"分类{seg_index}",
-                    "description": "d",
-                    "retrieval_query": "q",
-                    "expected_locations": [],
-                    "sort_order": 1,
-                }
-            ],
+            "schema_version": "2",
             "items": [
                 {
                     "id": "i1",
-                    "category_id": "c1",
+                    "category_id": "cat_002",
                     "title": f"标题{seg_index}",
                     "requirement": f"要求{seg_index}",
                     "technique": "t",
                     "importance": "medium",
-                    "source_references": [
-                        {
-                            "section": "s",
-                            "start": 0,
-                            "end": 1,
-                            "segment_index": seg_index,
-                            "coordinate_space": "segment",
-                        }
-                    ],
+                    "source_citations": "- 章节：s",
                     "retrieval_hints": ["h"],
-                    "expected_evidence": ["e"],
-                    "compliance_rules": {
-                        "satisfied": "a",
-                        "violated": "b",
-                        "cannot_satisfy": "c",
-                        "insufficient_evidence": "d",
-                    },
-                    "consequence_rules": {"score_risk": "扣分"},
+                    "expected_evidence": "- e",
+                    "compliance_rules": "## 满足\na\n\n## 违反\nb\n\n## 不能满足\nc\n\n## 证据不足\nd",
+                    "consequence_rules": "[score_risk]\n扣分",
                     "admin_config_refs": [],
                     "sort_order": 1,
                 }
@@ -226,9 +221,9 @@ def test_parse_checklist_payload_fills_defaults_for_flash_sparse_output():
     assert draft.categories[0].expected_locations == []
     assert draft.items[0].id
     assert draft.items[0].retrieval_hints == ["具备独立法人资格"]
-    assert draft.items[0].expected_evidence == ["具备独立法人资格"]
+    assert draft.items[0].expected_evidence.startswith("- ")
     assert draft.items[0].admin_config_refs == []
-    assert draft.items[0].consequence_rules["bid_unusable"]
+    assert draft.items[0].consequence_rules.startswith("[bid_unusable]")
     assert draft.items[0].content_target.get("query") == "具备独立法人资格"
     assert draft.items[0].content_target.get("file_role") == "bid"
 
@@ -329,7 +324,7 @@ def test_parse_checklist_payload_rewrites_blank_or_unknown_category_id():
 @pytest.mark.asyncio
 async def test_generate_accepts_flash_sparse_payload_and_passes_validation():
     async def fake_invoke(app_name, input_data):
-        return _flash_sparse_payload()
+        return V2_PAYLOAD
 
     segment = "投标人须具备独立法人资格。"
     context = _context(segment)

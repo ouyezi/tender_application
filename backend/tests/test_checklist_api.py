@@ -28,14 +28,13 @@ class StaticAgent:
 
 
 def _draft(tender_markdown):
-    requirement = "必须提交营业执照。"
-    start = tender_markdown.index(requirement)
+    del tender_markdown
     return ChecklistDraft(
-        schema_version="1",
+        schema_version="2",
         categories=[
             ChecklistCategoryDraft(
-                id="category",
-                name="资格证明",
+                id="category-001",
+                name="资质文件",
                 description="核验主体资格",
                 retrieval_query="营业执照",
                 expected_locations=["资格审查"],
@@ -45,23 +44,16 @@ def _draft(tender_markdown):
         items=[
             ChecklistItemDraft(
                 id="item",
-                category_id="category",
+                category_id="category-001",
                 title="营业执照",
-                requirement=requirement,
+                requirement="必须提交营业执照。",
                 technique="核验扫描件",
                 importance="high",
-                source_references=[
-                    {
-                        "coordinate_space": "segment",
-                        "segment_index": 0,
-                        "start": start,
-                        "end": start + len(requirement),
-                    }
-                ],
+                source_citations="- 章节：资格要求",
                 retrieval_hints=["营业执照"],
-                expected_evidence=["有效营业执照"],
-                compliance_rules={"satisfied": "材料完整"},
-                consequence_rules={"bid_unusable": "资格审查不通过"},
+                expected_evidence="- 有效营业执照",
+                compliance_rules="## 满足\n材料完整",
+                consequence_rules="[bid_unusable]\n资格审查不通过",
                 admin_config_refs=[7],
                 sort_order=1,
             )
@@ -133,7 +125,7 @@ async def test_get_checklist_returns_nested_report_without_private_raw_data(
         "status": "succeeded",
         "agent_type": "test",
         "agent_version": "2026.1",
-        "schema_version": "1",
+        "schema_version": "2",
         "error_message": None,
         "created_at": body["generation"]["created_at"],
         "finished_at": body["generation"]["finished_at"],
@@ -146,11 +138,11 @@ async def test_get_checklist_returns_nested_report_without_private_raw_data(
     category = body["categories"][0]
     assert category["expected_locations"] == ["资格审查"]
     item = category["items"][0]
-    assert item["source_references"][0]["segment_index"] == 0
+    assert item["source_citations"] == "- 章节：资格要求"
     assert item["retrieval_hints"] == ["营业执照"]
-    assert item["expected_evidence"] == ["有效营业执照"]
-    assert item["compliance_rules"] == {"satisfied": "材料完整"}
-    assert item["consequence_rules"] == {"bid_unusable": "资格审查不通过"}
+    assert item["expected_evidence"] == "- 有效营业执照"
+    assert item["compliance_rules"] == "## 满足\n材料完整"
+    assert item["consequence_rules"] == "[bid_unusable]\n资格审查不通过"
     assert item["admin_config_refs"] == [7]
     rendered = json.dumps(body, ensure_ascii=False)
     assert "raw_response_path" not in rendered
@@ -185,7 +177,7 @@ async def test_get_checklist_corrupt_json_returns_safe_fixed_error(client, tmp_p
     )
     async with db.SessionLocal() as session:
         item = (await session.scalars(select(ChecklistItem))).one()
-        item.source_references = '["secret-corrupt-value"'
+        item.retrieval_hints = '["secret-corrupt-value"'
         await session.commit()
 
     response = await client.get("/api/tasks/T-CHECKLIST-API/checklist")
@@ -302,6 +294,9 @@ async def test_retry_checklist_agent_failure_marks_task_failed_safely(
     from app.services import scheduler
 
     class FailingChecklistAgent:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
         async def generate(self, *, task_id, context):
             del task_id, context
             raise RuntimeError("secret-token /Users/private/checklist.json")

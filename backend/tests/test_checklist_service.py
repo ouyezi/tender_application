@@ -80,11 +80,10 @@ class BlockingAgent(StaticAgent):
 
 
 def valid_draft(tender_markdown: str) -> ChecklistDraft:
-    source_text = "必须提交营业执照。"
-    start = tender_markdown.index(source_text)
+    del tender_markdown
     category = ChecklistCategoryDraft(
-        id="local-category",
-        name="资格证明",
+        id="category-001",
+        name="资质文件",
         description="核验主体资格",
         retrieval_query="营业执照",
         expected_locations=["资格审查"],
@@ -94,26 +93,19 @@ def valid_draft(tender_markdown: str) -> ChecklistDraft:
         id="local-item",
         category_id=category.id,
         title="营业执照",
-        requirement=source_text,
+        requirement="必须提交营业执照。",
         technique="核验营业执照扫描件",
         importance="high",
-        source_references=[
-            {
-                "coordinate_space": "segment",
-                "segment_index": 0,
-                "start": start,
-                "end": start + len(source_text),
-            }
-        ],
+        source_citations="- 章节：资格要求",
         retrieval_hints=["营业执照"],
-        expected_evidence=["有效营业执照"],
-        compliance_rules={"satisfied": "材料完整"},
-        consequence_rules={"bid_unusable": "资格审查不通过"},
+        expected_evidence="- 有效营业执照",
+        compliance_rules="## 满足\n材料完整",
+        consequence_rules="[bid_unusable]\n资格审查不通过",
         admin_config_refs=[7],
         sort_order=1,
     )
     return ChecklistDraft(
-        schema_version="1",
+        schema_version="2",
         categories=[category],
         items=[item],
         raw_response={"provider": "fixture"},
@@ -242,7 +234,7 @@ async def test_generate_persists_rows_pointer_progress_and_artifacts(
     assert category.id.startswith(f"cat-{generation_id}-")
     assert item.id.startswith(f"item-{generation_id}-")
     assert item.category_id == category.id
-    assert json.loads(item.source_references)[0]["segment_index"] == 0
+    assert item.source_references == "- 章节：资格要求"
     assert json.loads(category.expected_locations) == ["资格审查"]
 
     raw_path = Path(generation.raw_response_path)
@@ -651,17 +643,8 @@ async def test_invalid_json_values_use_fallback_and_validation_error(
 def invalid_draft_cases(tender_markdown: str):
     draft = valid_draft(tender_markdown)
     item = draft.items[0]
-    too_many = [
-        replace(
-            item,
-            id=f"item-{index}",
-            title=f"营业执照 {index}",
-            requirement=f"要求 {index}",
-        )
-        for index in range(21)
-    ]
     return [
-        (replace(draft, items=[replace(item, source_references=[])]), "source_references"),
+        (replace(draft, items=[replace(item, source_citations="")]), "source_citations"),
         (replace(draft, items=[replace(item, importance="critical")]), "importance"),
         (replace(draft, items=[replace(item, category_id="missing")]), "category"),
         (
@@ -669,31 +652,12 @@ def invalid_draft_cases(tender_markdown: str):
             "duplicate item",
         ),
         (
-            replace(
-                draft,
-                items=[replace(item, compliance_rules={"unknown": "bad"})],
-            ),
+            replace(draft, items=[replace(item, compliance_rules="")]),
             "compliance_rules",
         ),
-        (replace(draft, items=too_many), "maximum"),
         (
-            replace(
-                draft,
-                items=[
-                    replace(
-                        item,
-                        source_references=[
-                            {
-                                "coordinate_space": "segment",
-                                "segment_index": 0,
-                                "start": 0,
-                                "end": 999,
-                            }
-                        ],
-                    )
-                ],
-            ),
-            "offset",
+            replace(draft, items=[replace(item, expected_evidence="")]),
+            "expected_evidence",
         ),
         (
             replace(draft, items=[replace(item, admin_config_refs=[999])]),
@@ -706,7 +670,6 @@ def invalid_field_type_cases(tender_markdown: str):
     draft = valid_draft(tender_markdown)
     category = draft.categories[0]
     item = draft.items[0]
-    source_reference = item.source_references[0]
     return [
         (
             replace(draft, categories=[replace(category, sort_order="1")]),
@@ -731,50 +694,12 @@ def invalid_field_type_cases(tender_markdown: str):
             replace(draft, items=[replace(item, admin_config_refs=[True])]),
             "item admin_config_refs",
         ),
-        (
-            replace(
-                draft,
-                items=[
-                    replace(
-                        item,
-                        source_references=[{**source_reference, "start": True}],
-                    )
-                ],
-            ),
-            "source start",
-        ),
-        (
-            replace(
-                draft,
-                items=[
-                    replace(
-                        item,
-                        compliance_rules={"satisfied": 1},
-                    )
-                ],
-            ),
-            "item compliance_rules",
-        ),
-        (
-            replace(
-                draft,
-                items=[
-                    replace(
-                        item,
-                        source_references=[
-                            {**source_reference, "synthetic": "false"}
-                        ],
-                    )
-                ],
-            ),
-            "source synthetic",
-        ),
         (replace(draft, raw_response=[]), "raw_response"),
     ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case_index", range(9))
+@pytest.mark.parametrize("case_index", range(6))
 async def test_invalid_field_types_raise_validation_errors(
     client, tmp_path, case_index
 ):
@@ -792,7 +717,7 @@ async def test_invalid_field_types_raise_validation_errors(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case_index", range(8))
+@pytest.mark.parametrize("case_index", range(7))
 async def test_invalid_drafts_fail_cleanly(client, tmp_path, case_index):
     del client
     from app.services.checklist_service import (
@@ -1009,7 +934,7 @@ async def test_process_interrupt_preserves_staged_for_publication_recovery(
     assert public_path.is_file()
     assert not list(private_staging_dir.glob("*staged*"))
     recovered_payload = json.loads(public_path.read_text(encoding="utf-8"))
-    assert recovered_payload["schema_version"] == "1"
+    assert recovered_payload["schema_version"] == "2"
     assert recovered_payload["items"]
 
 
@@ -1143,66 +1068,29 @@ async def test_recovery_removes_staged_when_formal_artifact_exists(
             filename,
         ).read_text(encoding="utf-8")
     )
-    assert formal_payload["schema_version"] == "1"
+    assert formal_payload["schema_version"] == "2"
 
 
-def test_compliance_rules_allows_empty_cannot_satisfy():
-    from app.services.checklist_service import (
-        _COMPLIANCE_KEYS,
-        _COMPLIANCE_OPTIONAL_EMPTY_KEYS,
-        _require_rules,
+def test_markdown_fields_reject_empty_source_citations():
+    from app.services.checklist_service import ChecklistValidationError, validate_draft
+    from app.services.checklist_context import PromptContext, ChecklistCallInput, SYSTEM_INSTRUCTIONS
+
+    draft = valid_draft("# 资格要求\n必须提交营业执照。")
+    draft = replace(
+        draft,
+        items=[replace(draft.items[0], source_citations="")],
     )
-
-    _require_rules(
-        {
-            "satisfied": "满足",
-            "violated": "违反",
-            "cannot_satisfy": "",
-            "insufficient_evidence": "证据不足",
-        },
-        "item compliance_rules",
-        _COMPLIANCE_KEYS,
-        optional_empty_keys=_COMPLIANCE_OPTIONAL_EMPTY_KEYS,
+    context = PromptContext(
+        system_instructions=SYSTEM_INSTRUCTIONS,
+        interpret_report="解读",
+        admin_config="[]",
+        segments=["# 资格要求\n必须提交营业执照。"],
+        calls=[],
     )
-
-
-def test_compliance_rules_allows_empty_insufficient_evidence():
-    from app.services.checklist_service import (
-        _COMPLIANCE_KEYS,
-        _COMPLIANCE_OPTIONAL_EMPTY_KEYS,
-        _require_rules,
-    )
-
-    _require_rules(
-        {
-            "satisfied": "满足",
-            "violated": "违反",
-            "cannot_satisfy": "",
-            "insufficient_evidence": "",
-        },
-        "item compliance_rules",
-        _COMPLIANCE_KEYS,
-        optional_empty_keys=_COMPLIANCE_OPTIONAL_EMPTY_KEYS,
-    )
-
-
-def test_compliance_rules_rejects_empty_satisfied():
-    from app.services.checklist_service import (
-        ChecklistValidationError,
-        _COMPLIANCE_KEYS,
-        _COMPLIANCE_OPTIONAL_EMPTY_KEYS,
-        _require_rules,
-    )
-
-    with pytest.raises(ChecklistValidationError, match="non-empty"):
-        _require_rules(
-            {
-                "satisfied": "",
-                "violated": "违反",
-                "cannot_satisfy": "",
-                "insufficient_evidence": "",
-            },
-            "item compliance_rules",
-            _COMPLIANCE_KEYS,
-            optional_empty_keys=_COMPLIANCE_OPTIONAL_EMPTY_KEYS,
+    with pytest.raises(ChecklistValidationError, match="source_citations"):
+        validate_draft(
+            draft,
+            context,
+            tender_markdown="# 资格要求\n必须提交营业执照。",
+            admin_configs=[{"id": 7}],
         )
