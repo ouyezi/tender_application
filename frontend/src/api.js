@@ -84,6 +84,10 @@ export function generateChecklist(id) {
   return request(`/api/tasks/${id}/actions/generate-checklist`, { method: 'POST' })
 }
 
+export function generateInterpretHtml(id) {
+  return request(`/api/tasks/${id}/actions/generate-interpret-html`, { method: 'POST' })
+}
+
 export function indexBid(id) {
   return request(`/api/tasks/${id}/actions/index-bid`, { method: 'POST' })
 }

@@ -1,0 +1,72 @@
+{
+  "agent": {
+    "id": "",
+    "code": "",
+    "zhName": "招标解读 HTML 报告生成助手",
+    "enName": "tender_interpret_html_report",
+    "description": "基于完整解读报告 Markdown，提取结构化内容并输出 JSON，供后端固定模板渲染为交互式招标分析 HTML 报告。",
+    "publishedVersion": 0,
+    "publishedAt": "",
+    "createdAt": ""
+  },
+  "application": {
+    "id": "",
+    "name": "招标解读 HTML 报告生成",
+    "enName": "tender_interpret_html_report_app",
+    "agentId": "",
+    "mode": "api",
+    "apiConfig": {
+      "syncType": "sync"
+    },
+    "concurrency": 10,
+    "timeoutMs": 600000,
+    "agentVersionRef": {
+      "publishMode": "latest"
+    },
+    "publishStatus": "draft",
+    "publishedAt": ""
+  },
+  "invoke": {
+    "method": "POST",
+    "path": "/v1/apps/invoke",
+    "appName": "tender_interpret_html_report_app",
+    "requiredInputs": [
+      "interpret_report"
+    ],
+    "optionalInputs": []
+  },
+  "model": {
+    "modelId": "mdl_780e2fbe",
+    "modelName": "qwen3.6-flash",
+    "temperature": 0.3,
+    "thinking": false
+  },
+  "io": {
+    "formatInput": true,
+    "inputSchema": [
+      {
+        "id": "f_interpret_report",
+        "name": "interpret_report",
+        "description": "完整解读报告 Markdown",
+        "type": "string",
+        "required": true,
+        "children": null,
+        "itemType": null
+      }
+    ],
+    "formatOutput": true,
+    "outputSchema": []
+  },
+  "prompt": {
+    "systemPrompt": "你是招标解读 HTML 报告结构化提取助手。\n\n## 输入\n\n### 完整解读报告（Markdown）\n{{interpret_report}}\n\n## 输出要求\n\n只输出一个 JSON 对象，禁止输出 Markdown、HTML、CSS、说明文字或代码块包裹。\n\n- 顶层必须包含 `schema_version`，且值必须为 `\"1\"`\n- 字段结构：meta、overview、risks、tasks、checklist、key_info、strategy、scoring\n- meta.title：报告标题（含项目名称）\n- meta.subtitle：招标编号、截标时间等摘要\n- meta.project_key：用于本地存储前缀，建议 tender_+招标编号去特殊字符\n- overview.rows：项目速览表格行，支持两列四格或 colspan 长行\n- risks：风险列表，level 只能是 high|mid|low\n- tasks.p0/p1/p2：投标任务，含 name、owner、deadline\n- checklist：检查清单分组，redline=true 表示废标红线组\n- key_info：timeline、qualification、commercial、technical\n- strategy：advantage、risk_avoid、price 三段策略文本\n- scoring：评分维度表格行\n\n## 质量要求\n\n- 仅依据解读报告内容提取，不得臆造\n- 解读报告缺项时对应数组可为空，但 meta.title 必填\n- 禁止输出 HTML 标签；strategy 中如需强调仅用 plain text",
+    "initialMessages": []
+  },
+  "runtime": {
+    "streaming": false,
+    "retryCount": 1,
+    "timeoutMs": 600000,
+    "sandboxEnabled": false,
+    "showThinking": false,
+    "multiTurn": false
+  }
+}

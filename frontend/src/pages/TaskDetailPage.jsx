@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import {
   fileUrl,
   generateChecklist,
+  generateInterpretHtml,
   getTask,
   indexBid,
   interpretHtmlUrl,
@@ -76,9 +77,11 @@ export default function TaskDetailPage() {
       readiness.checklist_lane_active ||
       readiness.bid_index_lane_active ||
       readiness.diagnosis_lane_active ||
-      readiness.full_run_active
+      readiness.full_run_active ||
+      readiness.interpret_html_lane_active
     const shouldPoll =
-      POLL_STATUSES.has(task.status) && (task.status !== 'draft' || laneActive)
+      readiness.interpret_html_lane_active ||
+      (POLL_STATUSES.has(task.status) && (task.status !== 'draft' || laneActive))
     if (!shouldPoll) return undefined
     const timer = setInterval(() => load(true), 2000)
     return () => clearInterval(timer)
@@ -130,7 +133,6 @@ export default function TaskDetailPage() {
   const status = task.status || 'running'
   const label = STATUS_LABELS[status] || status
   const results = task.results || []
-  const canDownloadInterpret = Boolean(task.interpret_html_path || task.interpret_markdown)
   const readiness = task.readiness || {}
   const terminal = new Set(['completed', 'stopped', 'failed'])
   const isTerminal = terminal.has(status)
@@ -178,11 +180,52 @@ export default function TaskDetailPage() {
           <Link className="btn btn-secondary" to={`/workspaces/${task.id}`}>
             打开工作区
           </Link>
-          {canDownloadInterpret && (
-            <a className="btn btn-secondary" href={interpretHtmlUrl(task.id)}>
-              下载解读报告
-            </a>
-          )}
+          {task.interpret_markdown && (() => {
+            const htmlReady = readiness.interpret_html_ready
+            const htmlGenerating = readiness.interpret_html_lane_active
+            const htmlError = readiness.interpret_html_error
+
+            if (htmlGenerating) {
+              return (
+                <button type="button" className="btn btn-secondary" disabled>
+                  HTML 生成中…
+                </button>
+              )
+            }
+            if (htmlReady) {
+              return (
+                <>
+                  <a className="btn btn-primary" href={interpretHtmlUrl(task.id)} download>
+                    直接下载
+                  </a>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={Boolean(actionLoading)}
+                    onClick={() => {
+                      if (!window.confirm('将覆盖已生成的 HTML 报告，是否继续？')) return
+                      runAction('interpret-html', () => generateInterpretHtml(id))
+                    }}
+                  >
+                    {actionLoading === 'interpret-html' ? '提交中…' : '重新生成'}
+                  </button>
+                </>
+              )
+            }
+            return (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={Boolean(actionLoading)}
+                  onClick={() => runAction('interpret-html', () => generateInterpretHtml(id))}
+                >
+                  {actionLoading === 'interpret-html' ? '提交中…' : '下载解读报告'}
+                </button>
+                {htmlError && <span className="page-error">{htmlError}</span>}
+              </>
+            )
+          })()}
           {status === 'completed' && (
             <a className="btn btn-primary" href={reportDocxUrl(task.id)}>
               下载诊断报告
