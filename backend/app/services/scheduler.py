@@ -97,11 +97,13 @@ def _split_items_by_diagnosis_mode(
 
 def _offline_batch_result(item: dict):
     from app.engine.base import BatchItemResult
+    from app.services.checklist_consequence import parse_consequence_tags_from_markdown
 
-    tags: list[str] = []
-    rules = item.get("consequence_rules") or {}
+    rules = item.get("consequence_rules") or ""
     if isinstance(rules, dict):
         tags = [k for k in rules if isinstance(k, str)]
+    else:
+        tags = parse_consequence_tags_from_markdown(str(rules))
     description = str(item.get("requirement") or item.get("title") or "")
     return BatchItemResult(
         checklist_item_id=item["id"],
@@ -659,7 +661,7 @@ async def _run_interpret_and_checklist(task_id: str, *, stop_at_checklist: bool)
         if _should_stop(task_id):
             await _mark_stopped(task_id)
             return
-        md_path, html_path = interpret_report.save_interpret_reports(
+        md_path = interpret_report.save_interpret_reports(
             task_id, interpret_result
         )
 
@@ -670,7 +672,6 @@ async def _run_interpret_and_checklist(task_id: str, *, stop_at_checklist: bool)
             if task.status in TERMINAL_STATUSES:
                 return
             task.interpret_md_path = md_path
-            task.interpret_html_path = html_path
             task.status = "generating_checklist"
             task.updated_at = utcnow()
             await session.commit()

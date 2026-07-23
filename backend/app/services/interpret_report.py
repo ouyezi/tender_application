@@ -59,15 +59,10 @@ def markdown_to_html_document(title: str, markdown: str) -> str:
     )
 
 
-def save_interpret_reports(task_id: str, result: InterpretationResult) -> tuple[str, str]:
+def save_interpret_reports(task_id: str, result: InterpretationResult) -> str:
     out_dir = REPORT_DIR / task_id
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / "interpret.md"
-    html_path = out_dir / "interpret.html"
     md_path.write_text(result.markdown, encoding="utf-8")
-    html_path.write_text(
-        markdown_to_html_document(result.title, result.markdown),
-        encoding="utf-8",
-    )
-    artifact.sync_to_artifact_report(task_id, md_path, html_path)
-    return str(md_path), str(html_path)
+    artifact.sync_to_artifact_report(task_id, md_path)
+    return str(md_path)

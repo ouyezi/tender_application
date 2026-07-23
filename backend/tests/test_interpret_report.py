@@ -12,17 +12,14 @@ def test_markdown_to_html_document_wraps_title_and_body():
     assert "正文段落" in html
 
 
-def test_save_interpret_reports_writes_md_and_html(tmp_path, monkeypatch):
+def test_save_interpret_reports_writes_md_only(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.interpret_report.REPORT_DIR", tmp_path / "reports")
     monkeypatch.setattr(artifact, "UPLOAD_DIR", tmp_path / "uploads")
     (tmp_path / "reports").mkdir()
     result = InterpretationResult(markdown="# 招标文件解读报告\n\nhello\n")
-    md_path, html_path = save_interpret_reports("T-1", result)
+    md_path = save_interpret_reports("T-1", result)
     assert Path(md_path).read_text(encoding="utf-8") == result.markdown
-    html = Path(html_path).read_text(encoding="utf-8")
-    assert "hello" in html
-    assert Path(html_path).name == "interpret.html"
+    assert not (tmp_path / "reports" / "T-1" / "interpret.html").exists()
     artifact_report = tmp_path / "uploads" / "T-1" / "report"
     assert (artifact_report / "interpret.md").is_file()
-    assert (artifact_report / "interpret.html").is_file()
-    assert (artifact_report / "interpret.md").read_text(encoding="utf-8") == result.markdown
+    assert not (artifact_report / "interpret.html").exists()

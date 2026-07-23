@@ -107,7 +107,7 @@ async def test_scheduler_runs_to_completion(client):
     assert all(result["checklist_item_id"] for result in detail["results"])
     assert all(result["compliance_status"] for result in detail["results"])
     assert detail["interpret_md_path"]
-    assert detail["interpret_html_path"]
+    assert not detail.get("interpret_html_path")
     interpret_md = Path(detail["interpret_md_path"]).read_text(encoding="utf-8")
     assert "stub interpret" in interpret_md
     assert "（Mock）" not in interpret_md
@@ -538,6 +538,21 @@ async def test_parse_failed_via_workspace_file(client, monkeypatch):
     assert detail["failure_stage"] == "tender_parse"
 
 
+def test_offline_batch_result_parses_markdown_consequence_tags():
+    from app.services.scheduler import _offline_batch_result
+
+    item = {
+        "id": "item-1",
+        "title": "签章",
+        "requirement": "需签章",
+        "consequence_rules": "[bid_unusable]\n否决",
+        "diagnosis_mode": "offline",
+    }
+    result = _offline_batch_result(item)
+    assert result.compliance == "manual_required"
+    assert "bid_unusable" in result.consequence_tags
+
+
 def test_split_and_offline_result():
     from app.services.scheduler import (
         _split_items_by_diagnosis_mode,
@@ -560,6 +575,7 @@ def test_split_and_offline_result():
     assert [i["id"] for i in file_items] == ["b", "c"]
     result = _offline_batch_result(offline[0])
     assert result.compliance == "manual_required"
+    assert result.consequence_tags == []
     assert result.evidence == "未检索文件（线下核验项）"
     assert result.suggestion == (
         "该项属于打印/装订/密封等线下要求，需人工核验纸质或现场材料，系统不进行文件诊断"
