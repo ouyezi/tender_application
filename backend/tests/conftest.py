@@ -21,7 +21,8 @@ class _SchedulerChecklistAgent:
     def __init__(self, **kwargs):
         from app.engine.checklist_agent_os import AgentOSChecklistAgent
 
-        if "invoke_app" not in kwargs and "client" not in kwargs:
+        kwargs.pop("client", None)
+        if "invoke_app" not in kwargs:
             kwargs["invoke_app"] = make_fake_checklist_invoke()
         self._agent = AgentOSChecklistAgent(**kwargs)
 
@@ -65,6 +66,8 @@ async def client(tmp_path, monkeypatch):
     app.mount("/artifact-files", StaticFiles(directory=str(upload_dir)), name="artifact-files")
     monkeypatch.setattr("app.services.report.REPORT_DIR", report_dir)
     monkeypatch.setattr("app.services.interpret_report.REPORT_DIR", report_dir)
+    monkeypatch.setattr("app.services.interpret_html_service.REPORT_DIR", report_dir)
+    monkeypatch.setattr("app.config.REPORT_DIR", report_dir)
     monkeypatch.setattr("app.config.MOCK_BATCH_DIAGNOSIS_DELAY_SECONDS", 0.15)
     monkeypatch.setattr("app.config.CHECKLIST_PARSE_POLL_SECONDS", 0.01)
     monkeypatch.setattr("app.config.RETRIEVAL_PROVIDER", "mock")

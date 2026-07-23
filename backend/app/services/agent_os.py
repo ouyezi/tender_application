@@ -29,6 +29,7 @@ class AgentOSSettings:
     parse_wait_timeout_seconds: float = 1800.0
     interpret_invoke_timeout_seconds: float = 1200.0
     checklist_invoke_timeout_seconds: float = 600.0
+    interpret_html_invoke_timeout_seconds: float = 600.0
     batch_diagnosis_index_wait_timeout_seconds: float = 7200.0
 
 
@@ -147,6 +148,14 @@ def load_settings(path: Optional[Path] = None) -> AgentOSSettings:
             _env_or(
                 tender_checklist.get("invokeTimeoutSeconds"),
                 "TENDER_CHECKLIST_INVOKE_TIMEOUT_SECONDS",
+                600,
+            ),
+            600.0,
+        ),
+        interpret_html_invoke_timeout_seconds=_as_float(
+            _env_or(
+                local.get("interpretHtmlInvokeTimeoutSeconds"),
+                "INTERPRET_HTML_INVOKE_TIMEOUT_SECONDS",
                 600,
             ),
             600.0,

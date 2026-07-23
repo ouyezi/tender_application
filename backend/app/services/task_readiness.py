@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy import select
 
 from app import db as database
 from app.models import DiagnosisTask, IndexJob
-from app.services import checklist_service, scheduler
+from app.services import checklist_service, interpret_html_service, scheduler
 from app.services.checklist_service import ChecklistNotAvailable
 
 
@@ -43,6 +45,9 @@ async def compute_task_readiness(task_id: str) -> dict:
 
         checklist_ready = task.current_checklist_generation_id is not None
         bid_index_ready = await _bid_index_ready(session, task)
+        interpret_html_ready = bool(
+            task.interpret_html_path and Path(task.interpret_html_path).is_file()
+        )
 
     bid_index_required = await _bid_index_required(task_id)
     lane = scheduler.get_lane_state(task_id)
@@ -60,4 +65,7 @@ async def compute_task_readiness(task_id: str) -> dict:
         "bid_index_lane_active": lane["bid_index_lane_active"],
         "full_run_active": lane["full_run_active"],
         "diagnosis_lane_active": lane["diagnosis_lane_active"],
+        "interpret_html_ready": interpret_html_ready,
+        "interpret_html_lane_active": interpret_html_service.is_lane_active(task_id),
+        "interpret_html_error": interpret_html_service.get_error(task_id),
     }

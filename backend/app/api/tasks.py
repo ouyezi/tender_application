@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.db import get_db
 from app.models import DiagnosisConfig, DiagnosisTask
 from app.schemas import ChecklistReportOut, ExecutionGraphOut, TaskListOut, TaskOut, TaskReadinessOut
-from app.services import checklist_service, files, scheduler, task_delete, workspace
+from app.services import checklist_service, files, interpret_html_service, scheduler, task_delete, workspace
 from app.services.task_readiness import compute_task_readiness
 from app.services.execution_graph import get_tracker
 from app.services.execution_graph.query import build_execution_graph_response
@@ -294,6 +294,26 @@ async def action_run_full(task_id: str) -> dict:
     except SchedulerConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     return _action_response(task_id, "running")
+
+
+@router.post("/{task_id}/actions/generate-interpret-html", status_code=status.HTTP_202_ACCEPTED)
+async def action_generate_interpret_html(task_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    task = await db.get(DiagnosisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if not task.interpret_md_path or not Path(task.interpret_md_path).is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Interpret report not available",
+        )
+    try:
+        await interpret_html_service.start(task_id)
+    except interpret_html_service.InterpretHtmlConflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="interpret_html_lane_active",
+        )
+    return _action_response(task_id, "generating_interpret_html")
 
 
 @router.get("/{task_id}/execution-graph", response_model=ExecutionGraphOut)

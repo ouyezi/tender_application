@@ -82,11 +82,11 @@ class ChecklistItemOut(BaseModel):
     requirement: str
     technique: str
     importance: str
-    source_references: List[dict]
+    source_citations: str = ""
     retrieval_hints: List[str]
-    expected_evidence: List[str]
-    compliance_rules: dict[str, str]
-    consequence_rules: dict[str, str]
+    expected_evidence: str = ""
+    compliance_rules: str = ""
+    consequence_rules: str = ""
     admin_config_refs: List[int]
     content_source: str = "precise_search"
     content_target: dict = {}
@@ -130,6 +130,9 @@ class TaskReadinessOut(BaseModel):
     bid_index_lane_active: bool
     full_run_active: bool
     diagnosis_lane_active: bool
+    interpret_html_ready: bool = False
+    interpret_html_lane_active: bool = False
+    interpret_html_error: Optional[str] = None
 
 
 class ChecklistReportOut(BaseModel):
