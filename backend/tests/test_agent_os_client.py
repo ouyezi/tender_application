@@ -1,4 +1,5 @@
 import json
+import logging
 
 import httpx
 import pytest
@@ -174,7 +175,7 @@ async def test_invoke_app_posts_app_name_and_input(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_invoke_app_retries_retryable_status(tmp_path, monkeypatch):
+async def test_invoke_app_retries_retryable_status(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
     monkeypatch.setenv("AGENT_OS_BASE_URL", "http://agent-os.test")
     monkeypatch.setenv("AGENT_OS_MAX_ATTEMPTS", "3")
@@ -188,9 +189,54 @@ async def test_invoke_app_retries_retryable_status(tmp_path, monkeypatch):
         return httpx.Response(200, json={"ok": True})
 
     client = agent_os.AgentOSClient(transport=httpx.MockTransport(handler))
-    result = await client.invoke_app("demo_app", {"q": "1"})
+    with caplog.at_level(logging.INFO, logger="app.services.agent_os"):
+        result = await client.invoke_app(
+            "demo_app",
+            {"q": "1"},
+            log_context={"task_id": "T1", "segment_index": 0},
+        )
     assert result == {"ok": True}
     assert calls["n"] == 3
+    start_logs = [
+        record.message
+        for record in caplog.records
+        if record.message.startswith("Agent OS invoke start")
+    ]
+    retry_logs = [
+        record.message
+        for record in caplog.records
+        if record.message.startswith("Agent OS invoke retry")
+    ]
+    assert len(start_logs) == 3
+    assert len(retry_logs) == 2
+    assert all("task_id=T1 segment_index=0" in message for message in start_logs)
+
+
+@pytest.mark.asyncio
+async def test_invoke_app_disables_system_proxy(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_os, "LOCAL_CONFIG_PATH", tmp_path / "missing.json")
+    monkeypatch.setenv("AGENT_OS_BASE_URL", "http://agent-os.test")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:8118")
+    captured: dict = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    client = agent_os.AgentOSClient()
+    result = await client.invoke_app("demo_app", {"q": "1"})
+    assert result == {"ok": True}
+    assert captured.get("trust_env") is False
 
 
 @pytest.mark.asyncio

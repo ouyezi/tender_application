@@ -4,9 +4,10 @@ import asyncio
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 import httpx
 
@@ -165,6 +166,13 @@ def _backoff_seconds(attempt: int) -> float:
     return min(2.0**attempt, 8.0)
 
 
+def _format_log_context(log_context: Mapping[str, object] | None) -> str:
+    if not log_context:
+        return ""
+    parts = [f"{key}={value}" for key, value in log_context.items()]
+    return " " + " ".join(parts)
+
+
 class AgentOSClient:
     def __init__(
         self,
@@ -182,6 +190,8 @@ class AgentOSClient:
         self,
         app_name: str,
         input_data: dict[str, object],
+        *,
+        log_context: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         settings = self._resolve_settings()
         if not settings.base_url:
@@ -199,22 +209,59 @@ class AgentOSClient:
         attempts = max(1, settings.max_attempts)
         last_error: Optional[Exception] = None
         timeout = httpx.Timeout(settings.timeout_seconds)
+        context_suffix = _format_log_context(log_context)
         async with httpx.AsyncClient(
-            timeout=timeout, transport=self._transport
+            timeout=timeout,
+            transport=self._transport,
+            trust_env=False,
         ) as client:
             for attempt in range(attempts):
+                attempt_no = attempt + 1
+                started_at = time.monotonic()
+                logger.info(
+                    "Agent OS invoke start app=%s attempt=%d/%d timeout_s=%.0f%s",
+                    app_name,
+                    attempt_no,
+                    attempts,
+                    settings.timeout_seconds,
+                    context_suffix,
+                )
                 try:
                     response = await client.post(url, json=body, headers=headers)
                 except (httpx.TimeoutException, httpx.TransportError) as exc:
+                    elapsed_s = time.monotonic() - started_at
                     last_error = AgentOSError(
                         f"Agent OS invoke transport error for app {app_name}: {type(exc).__name__}",
                         app_name=app_name,
                         retryable=True,
                     )
-                    if attempt + 1 >= attempts:
+                    if attempt_no >= attempts:
+                        logger.error(
+                            "Agent OS invoke failed app=%s attempt=%d/%d "
+                            "reason=transport_error error=%s elapsed_s=%.2f%s",
+                            app_name,
+                            attempt_no,
+                            attempts,
+                            type(exc).__name__,
+                            elapsed_s,
+                            context_suffix,
+                        )
                         raise last_error from exc
-                    await asyncio.sleep(_backoff_seconds(attempt))
+                    backoff_s = _backoff_seconds(attempt)
+                    logger.warning(
+                        "Agent OS invoke retry app=%s attempt=%d/%d "
+                        "reason=transport_error error=%s elapsed_s=%.2f backoff_s=%.0f%s",
+                        app_name,
+                        attempt_no,
+                        attempts,
+                        type(exc).__name__,
+                        elapsed_s,
+                        backoff_s,
+                        context_suffix,
+                    )
+                    await asyncio.sleep(backoff_s)
                     continue
+                elapsed_s = time.monotonic() - started_at
                 if response.status_code in _RETRYABLE_STATUS:
                     last_error = AgentOSError(
                         f"Agent OS invoke retryable HTTP {response.status_code} for app {app_name}",
@@ -222,11 +269,43 @@ class AgentOSClient:
                         status_code=response.status_code,
                         retryable=True,
                     )
-                    if attempt + 1 >= attempts:
+                    if attempt_no >= attempts:
+                        logger.error(
+                            "Agent OS invoke failed app=%s attempt=%d/%d "
+                            "reason=http_%d elapsed_s=%.2f%s",
+                            app_name,
+                            attempt_no,
+                            attempts,
+                            response.status_code,
+                            elapsed_s,
+                            context_suffix,
+                        )
                         raise last_error
-                    await asyncio.sleep(_backoff_seconds(attempt))
+                    backoff_s = _backoff_seconds(attempt)
+                    logger.warning(
+                        "Agent OS invoke retry app=%s attempt=%d/%d "
+                        "reason=http_%d elapsed_s=%.2f backoff_s=%.0f%s",
+                        app_name,
+                        attempt_no,
+                        attempts,
+                        response.status_code,
+                        elapsed_s,
+                        backoff_s,
+                        context_suffix,
+                    )
+                    await asyncio.sleep(backoff_s)
                     continue
                 if response.status_code >= 400:
+                    logger.error(
+                        "Agent OS invoke failed app=%s attempt=%d/%d "
+                        "reason=http_%d elapsed_s=%.2f%s",
+                        app_name,
+                        attempt_no,
+                        attempts,
+                        response.status_code,
+                        elapsed_s,
+                        context_suffix,
+                    )
                     raise AgentOSError(
                         f"Agent OS invoke HTTP {response.status_code} for app {app_name}",
                         app_name=app_name,
@@ -236,17 +315,43 @@ class AgentOSClient:
                 try:
                     payload = response.json()
                 except ValueError as exc:
+                    logger.error(
+                        "Agent OS invoke failed app=%s attempt=%d/%d "
+                        "reason=non_json_response elapsed_s=%.2f%s",
+                        app_name,
+                        attempt_no,
+                        attempts,
+                        elapsed_s,
+                        context_suffix,
+                    )
                     raise AgentOSResponseError(
                         f"Agent OS invoke returned non-JSON for app {app_name}",
                         app_name=app_name,
                         status_code=response.status_code,
                     ) from exc
                 if not isinstance(payload, dict):
+                    logger.error(
+                        "Agent OS invoke failed app=%s attempt=%d/%d "
+                        "reason=non_object_json elapsed_s=%.2f%s",
+                        app_name,
+                        attempt_no,
+                        attempts,
+                        elapsed_s,
+                        context_suffix,
+                    )
                     raise AgentOSResponseError(
                         f"Agent OS invoke returned non-object JSON for app {app_name}",
                         app_name=app_name,
                         status_code=response.status_code,
                     )
+                logger.info(
+                    "Agent OS invoke success app=%s attempt=%d/%d elapsed_s=%.2f%s",
+                    app_name,
+                    attempt_no,
+                    attempts,
+                    elapsed_s,
+                    context_suffix,
+                )
                 # Production invoke wraps business fields in structuredOutput when
                 # formatOutput is enabled; adapters expect the inner object.
                 structured = payload.get("structuredOutput")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Optional
+import logging
+import time
+from typing import Any, Awaitable, Callable, Mapping, Optional
 
 from app import config
 from app.engine.base import (
@@ -13,6 +15,8 @@ from app.services.agent_os import AgentOSClient
 from app.services.checklist_context import PromptContext
 
 TENDER_CHECKLIST_GENERATOR_APP_NAME = "tender_checklist_generator_app"
+
+logger = logging.getLogger(__name__)
 
 InvokeFn = Callable[[str, dict[str, object]], Awaitable[dict[str, object]]]
 
@@ -248,11 +252,20 @@ class AgentOSChecklistAgent:
         self._client = client
         self._invoke_app = invoke_app
 
-    async def _invoke(self, input_data: dict[str, object]) -> dict[str, object]:
+    async def _invoke(
+        self,
+        input_data: dict[str, object],
+        *,
+        log_context: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
         if self._invoke_app is not None:
             return await self._invoke_app(self.app_name, input_data)
         client = self._client or AgentOSClient()
-        return await client.invoke_app(self.app_name, input_data)
+        return await client.invoke_app(
+            self.app_name,
+            input_data,
+            log_context=log_context,
+        )
 
     async def generate(
         self,
@@ -260,18 +273,51 @@ class AgentOSChecklistAgent:
         task_id: str,
         context: PromptContext,
     ) -> ChecklistDraft:
-        del task_id
+        segment_count = len(context.calls)
+        logger.info(
+            "Checklist generation starting task_id=%s segment_count=%d app=%s",
+            task_id,
+            segment_count,
+            self.app_name,
+        )
         partials: list[ChecklistDraft] = []
         for call in context.calls:
+            segment_index = call.segment_index
+            logger.info(
+                "Checklist segment invoke starting task_id=%s segment_index=%d/%d segment_chars=%d",
+                task_id,
+                segment_index,
+                segment_count,
+                len(call.tender_segment),
+            )
+            started_at = time.monotonic()
             payload = await self._invoke(
                 {
                     "system_instructions": call.system_instructions,
                     "interpret_report": call.interpret_report,
                     "admin_config": call.admin_config,
                     "tender_segment": call.tender_segment,
-                }
+                },
+                log_context={
+                    "task_id": task_id,
+                    "segment_index": segment_index,
+                    "segment_count": segment_count,
+                    "segment_chars": len(call.tender_segment),
+                },
+            )
+            logger.info(
+                "Checklist segment invoke finished task_id=%s segment_index=%d/%d elapsed_s=%.2f",
+                task_id,
+                segment_index,
+                segment_count,
+                time.monotonic() - started_at,
             )
             partials.append(parse_checklist_payload(payload))
+        logger.info(
+            "Checklist generation agent calls finished task_id=%s segment_count=%d",
+            task_id,
+            segment_count,
+        )
         return merge_checklist_drafts(
             partials,
             max_items_per_category=config.CHECKLIST_MAX_ITEMS_PER_CATEGORY,
