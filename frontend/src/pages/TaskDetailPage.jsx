@@ -48,6 +48,7 @@ export default function TaskDetailPage() {
   const [actionError, setActionError] = useState('')
   const [actionLoading, setActionLoading] = useState('')
   const [reportTab, setReportTab] = useState('interpret')
+  const [interpretHtmlModalOpen, setInterpretHtmlModalOpen] = useState(false)
 
   const load = useCallback(
     async (silent = false) => {
@@ -163,6 +164,20 @@ export default function TaskDetailPage() {
   const canPause = isRunning
   const canResume = isPaused
 
+  function handleInterpretHtmlClick() {
+    if (readiness.interpret_html_lane_active) return
+    if (readiness.interpret_html_ready) {
+      setInterpretHtmlModalOpen(true)
+      return
+    }
+    runAction('interpret-html', () => generateInterpretHtml(id))
+  }
+
+  function handleRegenerateInterpretHtml() {
+    setInterpretHtmlModalOpen(false)
+    runAction('interpret-html', () => generateInterpretHtml(id))
+  }
+
   return (
     <main className="page task-detail-page">
       <header className="page-header">
@@ -180,52 +195,25 @@ export default function TaskDetailPage() {
           <Link className="btn btn-secondary" to={`/workspaces/${task.id}`}>
             打开工作区
           </Link>
-          {task.interpret_markdown && (() => {
-            const htmlReady = readiness.interpret_html_ready
-            const htmlGenerating = readiness.interpret_html_lane_active
-            const htmlError = readiness.interpret_html_error
-
-            if (htmlGenerating) {
-              return (
-                <button type="button" className="btn btn-secondary" disabled>
-                  HTML 生成中…
-                </button>
-              )
-            }
-            if (htmlReady) {
-              return (
-                <>
-                  <a className="btn btn-primary" href={interpretHtmlUrl(task.id)} download>
-                    直接下载
-                  </a>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    disabled={Boolean(actionLoading)}
-                    onClick={() => {
-                      if (!window.confirm('将覆盖已生成的 HTML 报告，是否继续？')) return
-                      runAction('interpret-html', () => generateInterpretHtml(id))
-                    }}
-                  >
-                    {actionLoading === 'interpret-html' ? '提交中…' : '重新生成'}
-                  </button>
-                </>
-              )
-            }
-            return (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={Boolean(actionLoading)}
-                  onClick={() => runAction('interpret-html', () => generateInterpretHtml(id))}
-                >
-                  {actionLoading === 'interpret-html' ? '提交中…' : '下载解读报告'}
-                </button>
-                {htmlError && <span className="page-error">{htmlError}</span>}
-              </>
-            )
-          })()}
+          {task.interpret_markdown && (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={Boolean(actionLoading) || readiness.interpret_html_lane_active}
+                onClick={handleInterpretHtmlClick}
+              >
+                {readiness.interpret_html_lane_active
+                  ? 'HTML 生成中…'
+                  : actionLoading === 'interpret-html'
+                    ? '提交中…'
+                    : '下载解读报告'}
+              </button>
+              {readiness.interpret_html_error && (
+                <span className="page-error">{readiness.interpret_html_error}</span>
+              )}
+            </>
+          )}
           {status === 'completed' && (
             <a className="btn btn-primary" href={reportDocxUrl(task.id)}>
               下载诊断报告
@@ -453,6 +441,57 @@ export default function TaskDetailPage() {
         <h2>诊断结果</h2>
         <ResultTable results={results} />
       </section>
+
+      {interpretHtmlModalOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setInterpretHtmlModalOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="interpret-html-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="modal-header">
+              <h2 id="interpret-html-modal-title">解读报告已生成</h2>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setInterpretHtmlModalOpen(false)}
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </header>
+            <div className="modal-form">
+              <p className="empty-state-hint">
+                请选择直接下载现有 HTML 报告，或重新生成并覆盖原文件。
+              </p>
+            </div>
+            <div className="modal-actions">
+              <a
+                className="btn btn-primary"
+                href={interpretHtmlUrl(task.id)}
+                download
+                onClick={() => setInterpretHtmlModalOpen(false)}
+              >
+                直接下载
+              </a>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={Boolean(actionLoading)}
+                onClick={handleRegenerateInterpretHtml}
+              >
+                重新生成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

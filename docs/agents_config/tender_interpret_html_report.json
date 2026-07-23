@@ -1,19 +1,19 @@
 {
   "agent": {
-    "id": "",
-    "code": "",
+    "id": "agt_d4ac7012",
+    "code": "agent_052",
     "zhName": "招标解读 HTML 报告生成助手",
     "enName": "tender_interpret_html_report",
     "description": "基于完整解读报告 Markdown，提取结构化内容并输出 JSON，供后端固定模板渲染为交互式招标分析 HTML 报告。",
-    "publishedVersion": 0,
-    "publishedAt": "",
-    "createdAt": ""
+    "publishedVersion": 1,
+    "publishedAt": "2026-07-23T19:27:22+08:00",
+    "createdAt": "2026-07-23T19:26:43+08:00"
   },
   "application": {
-    "id": "",
+    "id": "app_73786d5f",
     "name": "招标解读 HTML 报告生成",
     "enName": "tender_interpret_html_report_app",
-    "agentId": "",
+    "agentId": "agt_d4ac7012",
     "mode": "api",
     "apiConfig": {
       "syncType": "sync"
@@ -23,8 +23,8 @@
     "agentVersionRef": {
       "publishMode": "latest"
     },
-    "publishStatus": "draft",
-    "publishedAt": ""
+    "publishStatus": "published",
+    "publishedAt": "2026-07-23T19:27:23+08:00"
   },
   "invoke": {
     "method": "POST",

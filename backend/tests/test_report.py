@@ -190,7 +190,7 @@ async def test_completed_task_report_download(client, tmp_path):
     assert (artifact_report / "report.md").is_file()
     assert (artifact_report / "report.docx").is_file()
     assert (artifact_report / "interpret.md").is_file()
-    assert (artifact_report / "interpret.html").is_file()
+    assert not (artifact_report / "interpret.html").exists()
 
 
 @pytest.mark.asyncio
