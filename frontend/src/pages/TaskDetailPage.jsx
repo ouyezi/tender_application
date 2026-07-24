@@ -470,24 +470,24 @@ export default function TaskDetailPage() {
               <p className="empty-state-hint">
                 请选择直接下载现有 HTML 报告，或重新生成并覆盖原文件。
               </p>
-            </div>
-            <div className="modal-actions">
-              <a
-                className="btn btn-primary"
-                href={interpretHtmlUrl(task.id)}
-                download
-                onClick={() => setInterpretHtmlModalOpen(false)}
-              >
-                直接下载
-              </a>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={Boolean(actionLoading)}
-                onClick={handleRegenerateInterpretHtml}
-              >
-                重新生成
-              </button>
+              <div className="modal-actions modal-actions--balanced">
+                <a
+                  className="btn btn-primary"
+                  href={interpretHtmlUrl(task.id)}
+                  download
+                  onClick={() => setInterpretHtmlModalOpen(false)}
+                >
+                  直接下载
+                </a>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={Boolean(actionLoading)}
+                  onClick={handleRegenerateInterpretHtml}
+                >
+                  重新生成
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -517,6 +517,18 @@ a:hover {
   margin-top: 0.25rem;
 }
 
+.modal-actions--balanced {
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.modal-actions--balanced .btn {
+  flex: 1;
+  min-height: 2.5rem;
+  padding: 0.6rem 1rem;
+  text-decoration: none;
+}
+
 /* —— Admin layout —— */
 .admin-layout {
   display: flex;
